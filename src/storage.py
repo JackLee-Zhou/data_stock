@@ -887,14 +887,21 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "pool_pre_ping": True,
             }
 
-            # P3-3: SQLCipher 加密
+            # P3-3: SQLCipher 加密 — 连接时立即设置 PRAGMA key
             if encrypt_key:
                 try:
                     from sqlcipher3 import dbapi2 as sqlcipher_dbapi
                     import re
                     path_match = re.search(r'sqlite:///(.+)', db_url)
                     db_path = path_match.group(1) if path_match else db_url.replace('sqlite:///', '')
-                    engine_kwargs["creator"] = lambda: sqlcipher_dbapi.connect(db_path)
+
+                    _key = encrypt_key  # capture for closure
+                    def _create_encrypted_connection():
+                        conn = sqlcipher_dbapi.connect(db_path)
+                        conn.execute(f"PRAGMA key = '{_key}'")
+                        return conn
+
+                    engine_kwargs["creator"] = _create_encrypted_connection
                     logger.info("数据库加密已启用 (SQLCipher)")
                 except ImportError:
                     logger.error(
@@ -1020,9 +1027,6 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
             cursor = dbapi_connection.cursor()
             try:
-                # P3-3: SQLCipher 加密密钥
-                if encrypt_key:
-                    cursor.execute(f"PRAGMA key = '{encrypt_key}'")
                 cursor.execute(f"PRAGMA busy_timeout={int(self._sqlite_busy_timeout_ms)}")
                 if self._sqlite_file_db and self._sqlite_wal_enabled:
                     cursor.execute("PRAGMA journal_mode=WAL")
