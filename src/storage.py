@@ -774,6 +774,61 @@ class AlertCooldownRecord(Base):
     )
 
 
+class Watchlist(Base):
+    """自选股列表（替代 .env STOCK_LIST）"""
+    __tablename__ = 'watchlist'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), nullable=False, default='default')
+    stock_code = Column(String(16), nullable=False)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('name', 'stock_code', name='uix_watchlist_name_code'),
+        Index('ix_watchlist_name', 'name'),
+    )
+
+
+class SectorChainCache(Base):
+    """板块产业链分析缓存（避免重复调 LLM）"""
+    __tablename__ = 'sector_chain_cache'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sector_name = Column(String(128), nullable=False, unique=True)
+    chain_json = Column(Text, nullable=False)
+    heat_json = Column(Text)
+    generated_at = Column(DateTime, nullable=False, default=datetime.now)
+    ttl_minutes = Column(Integer, default=1440)
+
+    __table_args__ = (
+        Index('ix_sector_chain_name', 'sector_name'),
+    )
+
+
+class StockIndex(Base):
+    """股票自动补全索引（替代 stocks.index.json）"""
+    __tablename__ = 'stock_index'
+
+    canonical_code = Column(String(16), primary_key=True)
+    display_code = Column(String(10), nullable=False)
+    name_zh = Column(String(64), nullable=False)
+    pinyin = Column(String(128))
+    abbr = Column(String(16))
+    aliases_json = Column(Text)
+    market = Column(String(8), nullable=False)
+    asset_type = Column(String(16), default='stock')
+    active = Column(Boolean, default=True)
+    popularity = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        Index('ix_stock_index_name', 'name_zh'),
+        Index('ix_stock_index_pinyin', 'pinyin'),
+    )
+
+
 class _DatabaseManagerMeta(type):
     """Serialize DatabaseManager construction across __new__ and __init__."""
 
@@ -1922,8 +1977,195 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             logger.error(f"保存 {code} 数据失败: {e}")
             raise
     
+    # ── Watchlist (自选股) ────────────────────────────
+
+    def get_watchlist(self, name: str = "default") -> List[str]:
+        """获取指定分组的自选股代码列表（按 sort_order 排序）。"""
+        with self.session_scope() as session:
+            rows = (
+                session.query(Watchlist.stock_code)
+                .filter(Watchlist.name == name)
+                .order_by(Watchlist.sort_order)
+                .all()
+            )
+            return [r[0] for r in rows]
+
+    def get_watchlist_groups(self) -> List[str]:
+        """获取所有自选股分组名。"""
+        with self.session_scope() as session:
+            rows = session.query(Watchlist.name).distinct().order_by(Watchlist.name).all()
+            return [r[0] for r in rows]
+
+    def add_watchlist_stock(self, stock_code: str, name: str = "default") -> bool:
+        """添加一只股票到自选股。已存在则忽略。"""
+        from sqlalchemy import func
+        with self.session_scope() as session:
+            exists = (
+                session.query(Watchlist)
+                .filter(Watchlist.name == name, Watchlist.stock_code == stock_code)
+                .first()
+            )
+            if exists:
+                return False
+            max_order = (
+                session.query(func.coalesce(func.max(Watchlist.sort_order), -1))
+                .filter(Watchlist.name == name)
+                .scalar()
+            )
+            session.add(Watchlist(name=name, stock_code=stock_code, sort_order=max_order + 1))
+            return True
+
+    def remove_watchlist_stock(self, stock_code: str, name: str = "default") -> bool:
+        """从自选股中移除一只股票。"""
+        with self.session_scope() as session:
+            deleted = (
+                session.query(Watchlist)
+                .filter(Watchlist.name == name, Watchlist.stock_code == stock_code)
+                .delete()
+            )
+            return deleted > 0
+
+    def set_watchlist(self, codes: List[str], name: str = "default") -> int:
+        """全量替换一个分组的自选股列表。返回写入条数。"""
+        with self.session_scope() as session:
+            session.query(Watchlist).filter(Watchlist.name == name).delete()
+            for i, code in enumerate(codes):
+                session.add(Watchlist(name=name, stock_code=code.strip(), sort_order=i))
+            return len(codes)
+
+    def migrate_watchlist_from_env(self, env_stock_list: str) -> int:
+        """将 .env 的 STOCK_LIST 迁移到 watchlist 表（仅表为空时执行）。"""
+        with self.session_scope() as session:
+            existing = session.query(Watchlist).first()
+            if existing:
+                return 0
+            codes = [c.strip() for c in env_stock_list.split(",") if c.strip()]
+            for i, code in enumerate(codes):
+                session.add(Watchlist(name="default", stock_code=code, sort_order=i))
+            return len(codes)
+
+    # ── Sector Chain Cache (板块链缓存) ───────────────
+
+    def get_sector_chain_cache(self, sector_name: str) -> Optional[Dict[str, Any]]:
+        """获取板块链缓存（未过期时）。"""
+        import json
+        from datetime import timedelta
+        with self.session_scope() as session:
+            row = (
+                session.query(SectorChainCache)
+                .filter(SectorChainCache.sector_name == sector_name)
+                .first()
+            )
+            if not row:
+                return None
+            # 检查 TTL
+            expire_at = row.generated_at + timedelta(minutes=row.ttl_minutes or 1440)
+            if datetime.now() > expire_at:
+                return None
+            data = json.loads(row.chain_json)
+            if row.heat_json:
+                try:
+                    data["heat_analysis"] = json.loads(row.heat_json)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            data["cached_at"] = row.generated_at.isoformat()
+            return data
+
+    def set_sector_chain_cache(
+        self, sector_name: str, chain_data: Dict[str, Any], ttl_minutes: int = 1440
+    ) -> None:
+        """写入板块链缓存。"""
+        import json
+        with self.session_scope() as session:
+            heat_data = chain_data.get("heat_analysis")
+            heat_json = json.dumps(heat_data, ensure_ascii=False) if heat_data else None
+            chain_json = json.dumps(
+                {k: v for k, v in chain_data.items() if k != "heat_analysis"},
+                ensure_ascii=False,
+            )
+
+            row = (
+                session.query(SectorChainCache)
+                .filter(SectorChainCache.sector_name == sector_name)
+                .first()
+            )
+            if row:
+                row.chain_json = chain_json
+                row.heat_json = heat_json
+                row.generated_at = datetime.now()
+                row.ttl_minutes = ttl_minutes
+            else:
+                session.add(SectorChainCache(
+                    sector_name=sector_name,
+                    chain_json=chain_json,
+                    heat_json=heat_json,
+                    generated_at=datetime.now(),
+                    ttl_minutes=ttl_minutes,
+                ))
+
+    # ── Stock Index (股票索引) ────────────────────────
+
+    def import_stock_index_from_json(self, json_path: str) -> int:
+        """从 stocks.index.json 导入股票索引到 DB（仅表为空时）。"""
+        import json
+        with self.session_scope() as session:
+            existing = session.query(StockIndex).first()
+            if existing:
+                return 0
+
+            import json as _json
+            with open(json_path, "r", encoding="utf-8") as f:
+                items = _json.load(f)
+
+            count = 0
+            for item in items:
+                if not isinstance(item, list) or len(item) < 7:
+                    continue
+                session.add(StockIndex(
+                    canonical_code=str(item[0]),
+                    display_code=str(item[1]),
+                    name_zh=str(item[2]),
+                    pinyin=str(item[3]) if len(item) > 3 else None,
+                    abbr=str(item[4]) if len(item) > 4 else None,
+                    aliases_json=json.dumps(item[5]) if len(item) > 5 and isinstance(item[5], list) else None,
+                    market=str(item[6]) if len(item) > 6 else "CN",
+                    asset_type=str(item[7]) if len(item) > 7 else "stock",
+                    active=bool(item[8]) if len(item) > 8 else True,
+                    popularity=int(item[9]) if len(item) > 9 else 0,
+                ))
+                count += 1
+            return count
+
+    def search_stock_index(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """搜索股票索引（按名称/代码/拼音）。"""
+        with self.session_scope() as session:
+            q = f"%{query}%"
+            rows = (
+                session.query(StockIndex)
+                .filter(StockIndex.active == True)  # noqa: E712
+                .filter(
+                    StockIndex.name_zh.ilike(q) |
+                    StockIndex.display_code.ilike(q) |
+                    StockIndex.pinyin.ilike(q) |
+                    StockIndex.abbr.ilike(q)
+                )
+                .order_by(StockIndex.popularity.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "code": r.canonical_code,
+                    "display_code": r.display_code,
+                    "name": r.name_zh,
+                    "market": r.market,
+                    "type": r.asset_type,
+                }
+                for r in rows
+            ]
+
     def get_analysis_context(
-        self, 
+        self,
         code: str,
         target_date: Optional[date] = None
     ) -> Optional[Dict[str, Any]]:

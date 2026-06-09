@@ -12,7 +12,7 @@ interface SectorChainState {
   error: ParsedApiError | null;
 
   fetchSectors: () => Promise<void>;
-  analyzeSector: (name: string) => Promise<void>;
+  analyzeSector: (name: string, refresh?: boolean) => Promise<void>;
   reset: () => void;
 }
 
@@ -34,10 +34,10 @@ export const useSectorChainStore = create<SectorChainState>((set) => ({
     }
   },
 
-  analyzeSector: async (name: string) => {
+  analyzeSector: async (name: string, refresh = false) => {
     set({ selectedSector: name, isLoading: true, error: null, chainResult: null });
     try {
-      const result = await sectorChainApi.getChain(name);
+      const result = await sectorChainApi.getChain(name, refresh);
       set({ chainResult: result, isLoading: false });
     } catch (err) {
       set({ error: getParsedApiError(err), isLoading: false });

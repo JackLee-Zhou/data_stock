@@ -50,8 +50,8 @@ const SectorChainPage: React.FC = () => {
     return set;
   }, [chainResult]);
 
-  const handleAnalyze = useCallback((name: string) => {
-    void analyzeSector(name);
+  const handleAnalyze = useCallback((name: string, refresh = false) => {
+    void analyzeSector(name, refresh);
   }, [analyzeSector]);
 
   const getNodeName = useCallback((id: string) => nodeNameMap.get(id) || id, [nodeNameMap]);
@@ -134,11 +134,24 @@ const SectorChainPage: React.FC = () => {
             title="产业链拓扑图"
             subtitle={chainResult.sectorName}
             actions={
-              chainResult.analysisTimeMs ? (
+              <div className="flex items-center gap-2">
+                {chainResult.fromCache && (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                    缓存
+                  </span>
+                )}
                 <span className="text-xs text-tertiary-text">
-                  {formatTime(chainResult.generatedAt)} · {(chainResult.analysisTimeMs / 1000).toFixed(1)}s
+                  {formatTime(chainResult.generatedAt)}
+                  {chainResult.analysisTimeMs ? ` · ${(chainResult.analysisTimeMs / 1000).toFixed(1)}s` : ''}
                 </span>
-              ) : undefined
+                <button
+                  type="button"
+                  className="text-xs text-accent hover:underline"
+                  onClick={() => selectedSector && handleAnalyze(selectedSector, true)}
+                >
+                  刷新
+                </button>
+              </div>
             }
           >
             <SupplyChainGraph

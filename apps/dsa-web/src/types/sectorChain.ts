@@ -54,4 +54,6 @@ export interface SectorChainResponse {
   heatAnalysis: HeatAnalysis;
   generatedAt: string;
   analysisTimeMs?: number;
+  fromCache?: boolean;
+  cachedAt?: string;
 }

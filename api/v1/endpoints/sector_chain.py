@@ -8,7 +8,7 @@ GET  /api/v1/sector-chain/chain/{name}     — 分析指定板块的产业链
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from api.v1.schemas.sector_chain import (
     AvailableSector,
@@ -55,14 +55,17 @@ def list_available_sectors() -> AvailableSectorsResponse:
     },
     summary="分析板块产业链",
     description="输入行业板块名称，返回该板块的产业链结构（上下游节点、关系、卡脖子环节、热度分析）。"
-    "结果由 AI 基于板块成分股自动生成。",
+    "结果默认缓存 1 天，传 ?refresh=true 强制重新生成。",
 )
-def get_sector_chain(sector_name: str) -> SectorChainResponse:
+def get_sector_chain(
+    sector_name: str,
+    refresh: bool = Query(False, description="跳过缓存，强制重新生成"),
+) -> SectorChainResponse:
     """分析指定板块的产业链结构。"""
     service = SectorChainService()
 
     try:
-        result = service.analyze(sector_name)
+        result = service.analyze(sector_name, force_refresh=refresh)
     except RuntimeError as exc:
         logger.error("Sector chain LLM config error for %s: %s", sector_name, exc)
         raise HTTPException(

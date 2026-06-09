@@ -1172,17 +1172,8 @@ class Config:
                 pass
 
 
-        # 解析自选股列表（逗号分隔，统一为大写 Issue #355）
-        stock_list_str = cls._resolve_env_value(
-            'STOCK_LIST',
-            default='',
-            prefer_env_file=True,
-        )
-        stock_list = [
-            (c or "").strip().upper()
-            for c in stock_list_str.split(',')
-            if (c or "").strip()
-        ]
+        # 解析自选股列表（Config 初始化时不读 DB，后续由 refresh_stock_list 切换）
+        stock_list = cls._load_stock_list_from_env()
         
         # === LiteLLM multi-key parsing ===
         # GEMINI_API_KEYS (comma-separated) > GEMINI_API_KEY (single)
@@ -2428,34 +2419,40 @@ class Config:
         return bool(get_effective_agent_primary_model(self))
 
     def refresh_stock_list(self) -> None:
-        """
-        热读取 STOCK_LIST 环境变量并更新配置中的自选股列表
-        
-        支持两种配置方式：
-        1. .env 文件（本地开发、定时任务模式） - 修改后下次执行自动生效
-        2. 系统环境变量（GitHub Actions、Docker） - 启动时固定，运行中不变
-        """
-        # 优先从 .env 文件读取最新配置，这样即使在容器环境中修改了 .env 文件，
-        # 也能获取到最新的股票列表配置
+        """热刷新自选股列表（优先 DB watchlist 表，fallback .env）。"""
+        if not self.reload_stock_list_from_db():
+            self.stock_list = self._load_stock_list_from_env()
+
+    @classmethod
+    def _load_stock_list_from_env(cls) -> List[str]:
+        """从 .env 或环境变量读取 STOCK_LIST（Config 初始化专用，不碰 DB）。"""
+        stock_list_str = cls._resolve_env_value('STOCK_LIST', default='', prefer_env_file=True)
         env_file = os.getenv("ENV_FILE")
         env_path = Path(env_file) if env_file else (Path(__file__).parent.parent / '.env')
-        stock_list_str = ''
-        if env_path.exists():
-            # 直接从 .env 文件读取最新的配置
+        if not stock_list_str and env_path.exists():
             env_values = dotenv_values(env_path)
             stock_list_str = (env_values.get('STOCK_LIST') or '').strip()
-
-        # 如果 .env 文件不存在或未配置，才尝试从系统环境变量读取
         if not stock_list_str:
             stock_list_str = os.getenv('STOCK_LIST', '')
 
-        stock_list = [
+        return [
             (c or "").strip().upper()
             for c in stock_list_str.split(',')
             if (c or "").strip()
         ]
 
-        self.stock_list = stock_list
+    def reload_stock_list_from_db(self) -> bool:
+        """从 watchlist 表重新加载自选股列表（DB 初始化后调用）。返回是否成功。"""
+        try:
+            from src.storage import DatabaseManager
+            db = DatabaseManager()
+            codes = db.get_watchlist("default")
+            if codes:
+                self.stock_list = [c.strip().upper() for c in codes if c.strip()]
+                return True
+        except Exception:
+            pass
+        return False
     
     def validate_structured(self) -> List[ConfigIssue]:
         """Return structured validation issues with severity levels.

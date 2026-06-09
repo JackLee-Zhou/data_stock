@@ -70,3 +70,5 @@ class SectorChainResponse(BaseModel):
     heat_analysis: HeatAnalysis = Field(default_factory=HeatAnalysis, description="热度分析")
     generated_at: str = Field(..., description="生成时间(ISO 8601)")
     analysis_time_ms: Optional[int] = Field(None, description="分析耗时(ms)")
+    from_cache: bool = Field(False, description="是否来自缓存")
+    cached_at: Optional[str] = Field(None, description="缓存时间(ISO 8601)")

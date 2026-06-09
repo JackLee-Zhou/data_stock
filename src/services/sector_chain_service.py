@@ -89,35 +89,41 @@ class SectorChainService:
 
     # ── Public API ──────────────────────────────────────
 
-    def analyze(self, sector_name: str) -> Optional[Dict[str, Any]]:
+    def analyze(self, sector_name: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
         """
-        分析板块产业链。
+        分析板块产业链（优先读缓存）。
 
-        流程：
-        1. 拉取市场板块排行（1 次 akshare 请求）作为 LLM 上下文
-        2. LLM 生成拓扑结构（0 次请求）
-        3. 节点匹配真实板块，填充热度数据（0 次额外请求，复用步骤 1 的数据）
+        Args:
+            sector_name: 板块名称
+            force_refresh: 跳过缓存强制重新生成
         """
-        start = time.time()
-
         resolved = ALIAS_MAP.get(sector_name.strip().lower(), sector_name.strip())
         if resolved != sector_name.strip():
             logger.info("[产业链] 别名映射: %s → %s", sector_name, resolved)
 
-        # Step 1: 拉取市场热度上下文（1 次 API 调用）
-        sector_context = self._build_sector_context()
+        # 优先查缓存
+        if not force_refresh:
+            cached = self._load_from_cache(resolved)
+            if cached:
+                cached["from_cache"] = True
+                return cached
 
-        # Step 2: LLM 生成产业链拓扑（0 次 API 调用到 akshare）
+        # 缓存未命中 → 重新生成
+        start = time.time()
+
+        sector_context = self._build_sector_context()
         chain_data = self._llm_generate_chain(resolved, sector_context)
         if chain_data is None:
             return None
 
-        # Step 3: 后处理 — 用真实板块数据填充热度
         chain_data = self._enrich_heat(chain_data, sector_context)
-
         chain_data["sector_name"] = resolved
         chain_data["generated_at"] = datetime.now(TZ_SHANGHAI).isoformat()
         chain_data["analysis_time_ms"] = int((time.time() - start) * 1000)
+        chain_data["from_cache"] = False
+
+        # 写入缓存
+        self._save_to_cache(resolved, chain_data)
 
         logger.info(
             "[产业链] %s 完成: nodes=%d edges=%d bottlenecks=%d time=%dms",
@@ -128,6 +134,23 @@ class SectorChainService:
             chain_data["analysis_time_ms"],
         )
         return chain_data
+
+    def _load_from_cache(self, sector_name: str) -> Optional[Dict[str, Any]]:
+        try:
+            from src.storage import DatabaseManager
+            db = DatabaseManager()
+            return db.get_sector_chain_cache(sector_name)
+        except Exception as exc:
+            logger.warning("[产业链] 读取缓存失败: %s", exc)
+            return None
+
+    def _save_to_cache(self, sector_name: str, chain_data: Dict[str, Any]) -> None:
+        try:
+            from src.storage import DatabaseManager
+            db = DatabaseManager()
+            db.set_sector_chain_cache(sector_name, chain_data)
+        except Exception as exc:
+            logger.warning("[产业链] 写入缓存失败: %s", exc)
 
     def list_available_sectors(self) -> List[Dict[str, Any]]:
         """列出可选的行业+概念板块（用于前端下拉）。"""

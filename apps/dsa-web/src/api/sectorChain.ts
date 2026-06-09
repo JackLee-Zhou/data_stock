@@ -8,10 +8,12 @@ export const sectorChainApi = {
     return toCamelCase<AvailableSectorsResponse>(response.data);
   },
 
-  async getChain(sectorName: string): Promise<SectorChainResponse> {
+  async getChain(sectorName: string, refresh = false): Promise<SectorChainResponse> {
+    const params: Record<string, unknown> = {};
+    if (refresh) params.refresh = 'true';
     const response = await apiClient.get<Record<string, unknown>>(
       `/api/v1/sector-chain/chain/${encodeURIComponent(sectorName)}`,
-      { timeout: 120000 },
+      { timeout: 120000, params },
     );
     return toCamelCase<SectorChainResponse>(response.data);
   },

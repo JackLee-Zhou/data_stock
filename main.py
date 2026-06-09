@@ -253,6 +253,24 @@ def _reload_env_file_values_preserving_overrides() -> None:
     _RUNTIME_ENV_FILE_KEYS = managed_keys
 
 
+def _migrate_watchlist_on_startup(config) -> None:
+    """启动时将 .env 的 STOCK_LIST 迁移到 watchlist 表（仅首次）。"""
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        from src.storage import DatabaseManager
+        env_stock = os.getenv("STOCK_LIST", "")
+        if not env_stock:
+            return
+        db = DatabaseManager()
+        count = db.migrate_watchlist_from_env(env_stock)
+        if count > 0:
+            _log.info("[migrate] 已从 .env 迁移 %d 只自选股到 watchlist 表", count)
+            config.reload_stock_list_from_db()
+    except Exception as exc:
+        _log.warning("[migrate] 自选股迁移失败（不影响运行）: %s", exc)
+
+
 def parse_arguments() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
@@ -851,6 +869,9 @@ def main() -> int:
     warnings = config.validate()
     for warning in warnings:
         logger.warning(warning)
+
+    # 启动时自动迁移 .env STOCK_LIST → DB watchlist 表
+    _migrate_watchlist_on_startup(config)
 
     if getattr(args, "check_notify", False):
         from src.services.notification_diagnostics import (
