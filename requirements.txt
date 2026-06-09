@@ -50,7 +50,8 @@ fake-useragent>=1.4.0,<2.0.0       # Random User-Agent
 httpx[socks],<1.0.0                # HTTP client
 dingtalk-stream>=0.24.3,<1.0.0    # DingTalk Stream SDK
 # Database
-# SQLite is built into Python and does not need an extra package
+# SQLite is built into Python (pysqlcipher3 for encryption, P3-3)
+sqlcipher3>=0.5.0,<1.0.0       # SQLCipher encrypted SQLite (P3-3)
 
 # Discord bot
 discord.py>=2.0.0,<3.0.0              # Discord bot library

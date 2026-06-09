@@ -881,20 +881,40 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._sqlite_write_retry_max = config.sqlite_write_retry_max
             self._sqlite_write_retry_base_delay = config.sqlite_write_retry_base_delay
 
-            engine_kwargs = {
+            encrypt_key = (getattr(config, 'database_encryption_key', '') or '').strip()
+            engine_kwargs: Dict[str, Any] = {
                 "echo": False,
                 "pool_pre_ping": True,
             }
+
+            # P3-3: SQLCipher 加密
+            if encrypt_key:
+                try:
+                    from sqlcipher3 import dbapi2 as sqlcipher_dbapi
+                    import re
+                    path_match = re.search(r'sqlite:///(.+)', db_url)
+                    db_path = path_match.group(1) if path_match else db_url.replace('sqlite:///', '')
+                    engine_kwargs["creator"] = lambda: sqlcipher_dbapi.connect(db_path)
+                    logger.info("数据库加密已启用 (SQLCipher)")
+                except ImportError:
+                    logger.error(
+                        "DATABASE_ENCRYPTION_KEY 已设置但 sqlcipher3 未安装。"
+                        "请运行: pip install sqlcipher3"
+                    )
+                    raise
+
             if str(db_url).startswith("sqlite:") and self._sqlite_busy_timeout_ms > 0:
-                engine_kwargs["connect_args"] = {
-                    "timeout": self._sqlite_busy_timeout_ms / 1000,
-                }
+                engine_kwargs.setdefault("connect_args", {})["timeout"] = \
+                    self._sqlite_busy_timeout_ms / 1000
 
             # 创建数据库引擎
             created_engine = create_engine(
-                db_url,
+                db_url if not encrypt_key else "sqlite://",
                 **engine_kwargs,
             )
+            if encrypt_key:
+                from sqlcipher3 import dbapi2 as sqlcipher_dbapi
+                sqlcipher_dbapi  # noqa: keep import
             self._engine = created_engine
             self._is_sqlite_engine = self._engine.url.get_backend_name() == 'sqlite'
             self._sqlite_file_db = self._is_sqlite_engine and self._is_file_sqlite_database()
@@ -990,14 +1010,19 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             logger.warning(f"清理数据库引擎时出错: {e}")
 
     def _install_sqlite_pragma_handler(self) -> None:
-        """为 SQLite 连接安装竞争保护参数。"""
+        """为 SQLite / SQLCipher 连接安装 pragma（加密、WAL、超时）。"""
         if not self._is_sqlite_engine:
             return
+
+        encrypt_key = (getattr(get_config(), 'database_encryption_key', '') or '').strip()
 
         @event.listens_for(self._engine, "connect")
         def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
             cursor = dbapi_connection.cursor()
             try:
+                # P3-3: SQLCipher 加密密钥
+                if encrypt_key:
+                    cursor.execute(f"PRAGMA key = '{encrypt_key}'")
                 cursor.execute(f"PRAGMA busy_timeout={int(self._sqlite_busy_timeout_ms)}")
                 if self._sqlite_file_db and self._sqlite_wal_enabled:
                     cursor.execute("PRAGMA journal_mode=WAL")

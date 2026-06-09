@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     libjpeg62-turbo \
     libxrender1 \
+    libsqlcipher-dev \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 

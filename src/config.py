@@ -886,6 +886,7 @@ class Config:
 
     # === 数据库配置 ===
     database_path: str = "./data/stock_analysis.db"
+    database_encryption_key: str = ""  # P3-3: SQLCipher 加密密钥（为空则不加密）
     sqlite_wal_enabled: bool = True
     sqlite_busy_timeout_ms: int = 5000
     sqlite_write_retry_max: int = 3
@@ -1706,6 +1707,7 @@ class Config:
             md2img_engine=cls._parse_md2img_engine(os.getenv('MD2IMG_ENGINE', 'wkhtmltoimage')),
             prefetch_realtime_quotes=os.getenv('PREFETCH_REALTIME_QUOTES', 'true').lower() == 'true',
             database_path=os.getenv('DATABASE_PATH', './data/stock_analysis.db'),
+            database_encryption_key=os.getenv('DATABASE_ENCRYPTION_KEY', ''),
             sqlite_wal_enabled=os.getenv('SQLITE_WAL_ENABLED', 'true').lower() == 'true',
             sqlite_busy_timeout_ms=parse_env_int(
                 os.getenv('SQLITE_BUSY_TIMEOUT_MS'),
@@ -2922,11 +2924,21 @@ class Config:
     def get_db_url(self) -> str:
         """
         获取 SQLAlchemy 数据库连接 URL
-        
-        自动创建数据库目录（如果不存在）
+
+        P3-3: 使用 SQLCipher 加密。密钥存在时通过 PRAGMA key 设置加密。
         """
         db_path = Path(self.database_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        key = (self.database_encryption_key or "").strip()
+        if not key:
+            raise RuntimeError(
+                "DATABASE_ENCRYPTION_KEY 未设置。请在 .env 中添加:\n"
+                "  DATABASE_ENCRYPTION_KEY=<随机密钥>\n"
+                "生成方式: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+
+        # 使用标准 sqlite:// 连接，SQLCipher 加密通过 PRAGMA key 设置
         return f"sqlite:///{db_path.absolute()}"
 
 

@@ -171,11 +171,10 @@
 - **文件**: `.github/workflows/auto-tag.yml:34`（`anothrNick/github-tag-action`）
 - **修复**: 固定 Action 版本从 `@v1` 改为 `@1.67.0`（`e207854`），防止自动拉取可能被篡改的最新版
 
-### P3-3: SQLite 数据库未加密
+### P3-3: SQLite 数据库未加密 ✅ 已修复
 
-- **文件**: `src/storage.py:806-843`、`.env.example:640`
-- **现状**: 数据库以明文 SQLite 文件存储（`data/stock_analysis.db`），含分析结果、持仓、告警规则、聊天记录等。服务器文件系统被突破后可直接读取所有数据
-- **修复**: 使用 SQLite + SQLCipher 加密（`pysqlcipher3`），加密密钥从环境变量 `DATABASE_ENCRYPTION_KEY` 注入，不落盘。配合 P2-9（API Key 不进文件）形成完整的数据静态加密方案
+- **文件**: `src/storage.py:806-843`、`src/config.py`、`requirements.txt`、`.env`、`docker/Dockerfile`
+- **处理方案**: 使用 `sqlcipher3` 库 + PRAGMA key 加密。`DATABASE_ENCRYPTION_KEY` 通过 `.env` 或环境变量注入。启动时无密钥则拒绝启动。Dockerfile 已添加 `libsqlcipher-dev`。已有数据迁移到加密格式（旧文件 `.bak` 备份）
 
 ### P3-4: 依赖版本范围过宽 ✅ 已修复
 
@@ -281,9 +280,9 @@
 
 - **处理方案**: 已加入安全审查文档，详见 P2-9。计划在 Docker 部署中通过 `environment:` 注入密钥，`.env` 仅用于本地开发
 
-### P3-3: SQLite 未加密 📋 后续实施
+### P3-3: SQLite 加密 ✅ 已修复
 
-- **处理方案**: 已加入安全审查文档，详见 P3-3。计划使用 SQLCipher 加密，密钥通过环境变量注入
+- **处理方案**: 使用 `sqlcipher3` + PRAGMA key 加密，密钥通过 `DATABASE_ENCRYPTION_KEY` 注入。无密钥时拒绝启动。已迁移现有数据到加密格式
 
 ### P3-5: Discord @everyone 提及 ✅ 已修复
 
