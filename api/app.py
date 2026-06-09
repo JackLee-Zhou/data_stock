@@ -20,6 +20,7 @@ import logging
 import mimetypes
 import os
 import re
+import time
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from pathlib import Path
@@ -259,6 +260,25 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
     )
 
     add_auth_middleware(app)
+
+    # 请求日志中间件：记录每个 API 调用的方法、路径、耗时、状态码、客户端 IP
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        start = time.time()
+        response = await call_next(request)
+        elapsed_ms = int((time.time() - start) * 1000)
+        client_ip = (
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.client.host if request.client else "-"
+        )
+        user = getattr(request.state, "username", None) or "-"
+        logger.info(
+            "%s %s %d %dms client=%s user=%s",
+            request.method, request.url.path,
+            response.status_code, elapsed_ms,
+            client_ip, user,
+        )
+        return response
 
     # P2-4: 添加 CSP 头部（安全加固）
     @app.middleware("http")
