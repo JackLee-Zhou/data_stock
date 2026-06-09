@@ -166,10 +166,10 @@
 - **文件**: `scripts/build-backend-macos.sh:39`、`scripts/build-backend.ps1:40`
 - **修复**: 配合 `requirements.txt` 中的 hash 使用 `pip install --require-hashes`
 
-### P3-2: 第三方 GitHub Action 供应链风险
+### P3-2: 第三方 GitHub Action 供应链风险 ✅ 已修复
 
 - **文件**: `.github/workflows/auto-tag.yml:34`（`anothrNick/github-tag-action`）
-- **修复**: 固定 Action 版本到具体 commit hash
+- **修复**: 固定 Action 版本从 `@v1` 改为 `@1.67.0`（`e207854`），防止自动拉取可能被篡改的最新版
 
 ### P3-3: SQLite 数据库未加密
 
