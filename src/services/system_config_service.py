@@ -116,7 +116,23 @@ class SystemConfigService:
             "skill": "specialist",
         }
     }
-    _SERVER_MASKED_CONFIG_KEYS: Set[str] = {"ALPHASIFT_INSTALL_SPEC"}
+    # 所有敏感字段在 API GET 响应中强制掩码，防止浏览器 Network 面板泄露密钥
+    _SERVER_MASKED_CONFIG_KEYS: Set[str] = set()
+
+    @classmethod
+    def _get_masked_keys(cls) -> Set[str]:
+        """动态读取 config_registry 中所有 is_sensitive=True 的 key。"""
+        if cls._SERVER_MASKED_CONFIG_KEYS:
+            return cls._SERVER_MASKED_CONFIG_KEYS
+        try:
+            from src.core.config_registry import _FIELD_DEFINITIONS
+            cls._SERVER_MASKED_CONFIG_KEYS = {
+                k for k, v in _FIELD_DEFINITIONS.items()
+                if isinstance(v, dict) and v.get("is_sensitive")
+            }
+        except Exception:
+            cls._SERVER_MASKED_CONFIG_KEYS = set()
+        return cls._SERVER_MASKED_CONFIG_KEYS
     _NOTIFICATION_TEST_CHANNELS: Tuple[str, ...] = (
         "wechat",
         "feishu",
@@ -379,7 +395,7 @@ class SystemConfigService:
             field_schema = schema_by_key[key]
             display_value = self._resolve_display_value(raw_value, field_schema, raw_value_exists)
             is_masked = False
-            if key in self._SERVER_MASKED_CONFIG_KEYS and display_value:
+            if key in self._get_masked_keys() and display_value:
                 display_value = mask_token
                 is_masked = True
             item: Dict[str, Any] = {
