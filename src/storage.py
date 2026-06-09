@@ -800,7 +800,7 @@ class SectorChainCache(Base):
     chain_json = Column(Text, nullable=False)
     heat_json = Column(Text)
     generated_at = Column(DateTime, nullable=False, default=datetime.now)
-    ttl_minutes = Column(Integer, default=1440)
+    ttl_minutes = Column(Integer, default=525600)  # 默认 1 年
 
     __table_args__ = (
         Index('ix_sector_chain_name', 'sector_name'),
@@ -2059,7 +2059,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             if not row:
                 return None
             # 检查 TTL
-            expire_at = row.generated_at + timedelta(minutes=row.ttl_minutes or 1440)
+            expire_at = row.generated_at + timedelta(minutes=row.ttl_minutes or 525600)
             if datetime.now() > expire_at:
                 return None
             data = json.loads(row.chain_json)
@@ -2072,7 +2072,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             return data
 
     def set_sector_chain_cache(
-        self, sector_name: str, chain_data: Dict[str, Any], ttl_minutes: int = 1440
+        self, sector_name: str, chain_data: Dict[str, Any], ttl_minutes: int = 525600
     ) -> None:
         """写入板块链缓存。"""
         import json

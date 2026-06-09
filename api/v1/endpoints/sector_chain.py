@@ -103,6 +103,8 @@ def get_sector_chain(
         heat_analysis=_build_heat_analysis(result.get("heat_analysis", {})),
         generated_at=result.get("generated_at", ""),
         analysis_time_ms=result.get("analysis_time_ms"),
+        from_cache=result.get("from_cache", False),
+        cached_at=result.get("cached_at"),
     )
 
 
