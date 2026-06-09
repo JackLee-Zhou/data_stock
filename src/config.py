@@ -605,6 +605,16 @@ def setup_env(override: bool = False):
         env_path = Path(__file__).parent.parent / '.env'
     load_dotenv(dotenv_path=env_path, override=override)
 
+    # 修复 macOS Python 证书缺失问题
+    # Python framework 安装时 cert.pem 可能不存在，导致所有 HTTPS 请求
+    # 报 SSL: CERTIFICATE_VERIFY_FAILED。certifi 自带完整的 CA bundle。
+    if not os.getenv("SSL_CERT_FILE"):
+        try:
+            import certifi
+            os.environ["SSL_CERT_FILE"] = certifi.where()
+        except Exception:
+            pass
+
 
 @dataclass
 class Config:
@@ -1121,7 +1131,47 @@ class Config:
                 os.environ['HTTPS_PROXY'] = https_proxy
                 os.environ['https_proxy'] = https_proxy
 
-        
+        else:
+            # 未显式配置代理时，主动绕过 macOS 系统代理（SystemConfiguration 框架）
+            # urllib3 在 macOS 上会通过 SCDynamicStoreCopyProxies 读取系统代理，
+            # 即使环境变量未设置也会使用，导致国内数据源请求走代理而超时/失败。
+            _no_proxy_domains = [
+                'eastmoney.com', 'sina.com.cn', '163.com', 'tushare.pro',
+                'baostock.com', 'sse.com.cn', 'szse.cn', 'csindex.com.cn',
+                'cninfo.com.cn', '10jqka.com.cn', 'hexun.com', 'eastmoney.com',
+                'localhost', '127.0.0.1',
+            ]
+            current = os.getenv('NO_PROXY') or os.getenv('no_proxy') or ''
+            existing = [d.strip() for d in current.split(',') if d.strip()]
+            merged = list(set(existing + _no_proxy_domains))
+            os.environ['NO_PROXY'] = ','.join(merged)
+            os.environ['no_proxy'] = ','.join(merged)
+
+            # 显式清空代理变量，防止 urllib3 / requests 读取系统代理
+            # 注意：不能只靠 NO_PROXY，urllib3 2.x 的系统代理检测需要显式覆盖
+            for _key in ('HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'):
+                if not os.getenv(_key):
+                    os.environ[_key] = ''
+
+            # monkey-patch: 所有后续创建的 requests Session 默认不读系统代理
+            # macOS 上 urllib3 2.x 通过 SystemConfiguration.framework 检测系统代理，
+            # 即使 HTTP_PROXY 环境变量为空也会使用。在 Session.__init__ 后强设。
+            try:
+                import requests
+
+                _orig_session_init = requests.Session.__init__
+
+                def _patched_init(self_sess, *args, **kwargs):
+                    _orig_session_init(self_sess, *args, **kwargs)
+                    self_sess.trust_env = False
+
+                # 只在 Python 实现上生效（非 C 扩展），安全回退
+                if callable(_orig_session_init):
+                    requests.Session.__init__ = _patched_init  # type: ignore[method-assign]
+            except Exception:
+                pass
+
+
         # 解析自选股列表（逗号分隔，统一为大写 Issue #355）
         stock_list_str = cls._resolve_env_value(
             'STOCK_LIST',

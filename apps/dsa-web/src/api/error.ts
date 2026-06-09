@@ -21,6 +21,7 @@ export interface ParsedApiError {
   rawMessage: string;
   status?: number;
   category: ApiErrorCategory;
+  suggestions?: string[];
 }
 
 type ResponseLike = {
@@ -43,6 +44,7 @@ type CreateParsedApiErrorOptions = {
   rawMessage?: string;
   status?: number;
   category?: ApiErrorCategory;
+  suggestions?: string[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -211,6 +213,7 @@ export function createParsedApiError(options: CreateParsedApiErrorOptions): Pars
     rawMessage: options.rawMessage?.trim() || options.message,
     status: options.status,
     category: options.category ?? 'unknown',
+    suggestions: options.suggestions,
   };
 }
 
@@ -300,6 +303,15 @@ export function parseApiError(error: unknown): ParsedApiError {
   const rawMessage = pickString(payloadText, response?.statusText, errorMessage, causeMessage, code)
     ?? '请求未成功完成，请稍后重试。';
   const matchText = buildMatchText([rawMessage, errorMessage, causeMessage, code, errorCode, response?.statusText]);
+
+  // 提取服务端建议列表（如板块名模糊匹配建议）
+  const respData = response?.data;
+  const suggestions: string[] | undefined =
+    isRecord(respData) && Array.isArray(respData.detail) && (respData.detail as unknown[]).every((x) => typeof x === 'string')
+      ? (respData.detail as unknown as string[])
+      : isRecord(respData) && isRecord(respData.detail) && Array.isArray((respData.detail as Record<string, unknown>).suggestions)
+        ? ((respData.detail as Record<string, unknown>).suggestions as string[])
+        : undefined;
 
   if (includesAny(matchText, ['agent mode is not enabled', 'agent_mode'])) {
     return createParsedApiError({
@@ -534,6 +546,7 @@ export function parseApiError(error: unknown): ParsedApiError {
       rawMessage,
       status,
       category: 'http_error',
+      suggestions,
     });
   }
 
@@ -543,6 +556,7 @@ export function parseApiError(error: unknown): ParsedApiError {
     rawMessage,
     status,
     category: 'unknown',
+    suggestions,
   });
 }
 

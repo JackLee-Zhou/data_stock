@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@remixicon/react": "^4.9.0",
+    "@xyflow/react": "^12.11.0",
     "axios": "^1.13.4",
     "camelcase-keys": "^10.0.2",
     "clsx": "^2.1.1",

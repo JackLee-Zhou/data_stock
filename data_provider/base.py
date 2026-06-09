@@ -3166,6 +3166,66 @@ class DataFetcherManager:
             logger.warning(f"[概念排行] 所有数据源均失败，最终错误: {last_error}")
         return [], []
 
+    def get_futures_quotes(self) -> Optional[List[Dict[str, Any]]]:
+        """获取国内商品期货主力合约行情（自动切换数据源）。"""
+        last_error = ""
+        for fetcher in self._fetchers:
+            if not hasattr(fetcher, 'get_futures_quotes'):
+                continue
+            try:
+                data = fetcher.get_futures_quotes()
+                if data:
+                    logger.info(f"[{fetcher.name}] 获取期货行情成功，{len(data)} 条")
+                    return data
+                last_error = f"{fetcher.name}返回空结果"
+            except Exception as e:
+                error_type, error_reason = summarize_exception(e)
+                last_error = f"{fetcher.name} ({error_type}) {error_reason}"
+                logger.warning(f"[{fetcher.name}] 获取期货行情失败: {error_reason}")
+        if last_error:
+            logger.warning(f"[期货行情] 所有数据源均失败，最终错误: {last_error}")
+        return None
+
+    def get_board_constituents(self, board_name: str) -> List[Dict[str, Any]]:
+        """获取指定板块的成分股列表（自动切换数据源）。"""
+        last_error = ""
+        for fetcher in self._fetchers:
+            if not hasattr(fetcher, 'get_board_constituents'):
+                continue
+            try:
+                data = fetcher.get_board_constituents(board_name)
+                if data:
+                    logger.info(f"[{fetcher.name}] 获取 {board_name} 成分股成功，{len(data)} 只")
+                    return data
+                last_error = f"{fetcher.name}返回空结果"
+            except Exception as e:
+                error_type, error_reason = summarize_exception(e)
+                last_error = f"{fetcher.name} ({error_type}) {error_reason}"
+                logger.warning(f"[{fetcher.name}] 获取 {board_name} 成分股失败: {error_reason}")
+        if last_error:
+            logger.warning(f"[板块成分股] 所有数据源均失败，最终错误: {last_error}")
+        return []
+
+    def get_concept_constituents(self, concept_name: str) -> List[Dict[str, Any]]:
+        """获取指定概念板块的成分股（行业板块兜底）。"""
+        last_error = ""
+        for fetcher in self._fetchers:
+            if not hasattr(fetcher, 'get_concept_constituents'):
+                continue
+            try:
+                data = fetcher.get_concept_constituents(concept_name)
+                if data:
+                    logger.info(f"[{fetcher.name}] 获取 {concept_name} 概念成分股成功，{len(data)} 只")
+                    return data
+                last_error = f"{fetcher.name}返回空结果"
+            except Exception as e:
+                error_type, error_reason = summarize_exception(e)
+                last_error = f"{fetcher.name} ({error_type}) {error_reason}"
+                logger.warning(f"[{fetcher.name}] 获取 {concept_name} 概念成分股失败: {error_reason}")
+        if last_error:
+            logger.warning(f"[概念成分股] 所有数据源均失败，最终错误: {last_error}")
+        return []
+
     def get_hot_stocks(self, n: int = 10) -> List[Dict[str, Any]]:
         """获取市场人气股榜（自动切换数据源）。"""
         last_error = ""
