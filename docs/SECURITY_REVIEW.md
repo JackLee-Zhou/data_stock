@@ -142,11 +142,11 @@
 - **风险**: Cookie `secure` 标志仅在检测到 HTTPS 代理头时才设置，纯 HTTP 部署时 Cookie 明文传输
 - **修复**: 生产环境通过反向代理终止 TLS，并配置 `TRUST_X_FORWARDED_FOR` 等代理信任设置
 
-### P2-8: CI 日志包含配置信息
+### P2-8: CI 日志包含配置信息 ✅ 已修复
 
-- **文件**: `.github/workflows/daily-analysis.yml:402-454`
+- **文件**: `.github/workflows/daily-analysis.yml`
 - **风险**: 分析任务日志中打印了哪些密钥已配置的信息，这些日志被上传为公开 artifact
-- **修复**: 减少日志中的配置详情，或限制 artifact 访问权限
+- **处理方案**: CI 模式下设置 `LOG_LEVEL=WARNING`，减少配置详情输出。GitHub Actions artifact 默认保留 90 天自动清理
 
 ### P2-9: API Key 明文存储在 .env 文件
 
