@@ -35,6 +35,18 @@ x-common: &common
   environment:
     - TZ=Asia/Shanghai
 
+    # P3-3: SQLCipher 数据库加密密钥（部署前生成，生成方式见下方注释）
+    # 生成方式: python -c "import secrets; print(secrets.token_hex(32))"
+    - DATABASE_ENCRYPTION_KEY=${DATABASE_ENCRYPTION_KEY}
+
+    # P2-9: 生产环境跳过 .env 文件，所有密钥通过环境变量注入
+    - ENV_ONLY=true
+    # 将 .env 中的密钥全部移到下方（示例）:
+    # - DEEPSEEK_API_KEY=sk-xxx
+    # - TUSHARE_TOKEN=xxx
+    # - TELEGRAM_BOT_TOKEN=xxx
+    # - GEMINI_API_KEY=xxx
+
     # Web/API service bind address (must be 0.0.0.0 inside container)
     - WEBUI_HOST=0.0.0.0
     # API_PORT 从 .env 文件读取，无需在此硬编码
