@@ -207,6 +207,24 @@ def get_stock_name_index_map() -> Dict[str, str]:
             except (OSError, TypeError, ValueError) as exc:
                 logger.debug("[股票名称] 读取股票索引失败 %s: %s", index_path, exc)
 
+        # fallback: 从 DB stock_index 表查询
+        try:
+            from src.storage import DatabaseManager
+            db = DatabaseManager()
+            results = db.search_stock_index("", limit=20)
+            if results:
+                # 构建 code → name 映射
+                db_map = {}
+                for r in results:
+                    if r.get("code") and r.get("name"):
+                        db_map[r["code"]] = r["name"]
+                if db_map:
+                    _STOCK_INDEX_CACHE = db_map
+                    logger.debug("[股票名称] 从 DB 加载索引: %d 条", len(db_map))
+                    return _STOCK_INDEX_CACHE
+        except Exception as exc:
+            logger.debug("[股票名称] DB 索引查询失败: %s", exc)
+
         _STOCK_INDEX_CACHE = {}
         return _STOCK_INDEX_CACHE
 
