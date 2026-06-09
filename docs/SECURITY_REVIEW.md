@@ -130,11 +130,11 @@
   3. 认证后仍通过 HTTPS 传输（配合 P1-7）
   4. 考虑：远程部署时检测 `ADMIN_AUTH_ENABLED=false` 且 `WEBUI_HOST=0.0.0.0` 时拒绝启动，而非仅打印警告
 
-### P2-6: DingTalk Webhook 签名验证可被绕过
+### P2-6: DingTalk Webhook 签名验证可被绕过 ✅ 已修复
 
 - **文件**: `bot/platforms/dingtalk.py:63-71`
 - **风险**: 未配置 `app_secret` 时跳过签名验证；缺少 `timestamp` 或 `sign` 头时直接返回 True 放行
-- **修复**: 生产环境强制要求签名验证，缺少签名时拒绝请求
+- **处理方案**: 缺少 `timestamp` 或 `sign` 头时改为返回 False 拒绝请求（不再放行）
 
 ### P2-7: Session Cookie secure 标志
 

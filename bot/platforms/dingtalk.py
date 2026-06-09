@@ -62,13 +62,13 @@ class DingtalkPlatform(BotPlatform):
         if not self._app_secret:
             logger.warning("[DingTalk] 未配置 app_secret，跳过签名验证")
             return True
-        
+
         timestamp = headers.get('timestamp', '')
         sign = headers.get('sign', '')
-        
+
         if not timestamp or not sign:
-            logger.warning("[DingTalk] 缺少签名参数")
-            return True  # 可能是不需要签名的请求
+            logger.warning("[DingTalk] 缺少签名参数，拒绝请求")
+            return False
         
         # 验证时间戳（1小时内有效）
         try:
