@@ -208,7 +208,7 @@ class DiscordPlatform(BotPlatform):
             "tts": False,
             "embeds": [],
             "allowed_mentions": {
-                "parse": ["users", "roles", "everyone"]
+                "parse": ["users", "roles"]
             },
         }
 

@@ -4,7 +4,8 @@
 name: PR Review
 
 on:
-  pull_request_target:
+  # 使用 pull_request 而非 pull_request_target，避免 secrets 暴露给 PR 代码
+  pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - '**.py'

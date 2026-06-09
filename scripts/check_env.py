@@ -100,12 +100,8 @@ def check_config():
     
     print_section("API 配置")
     print(f"  Tushare Token: {'已配置 ✓' if config.tushare_token else '未配置 ✗'}")
-    if config.tushare_token:
-        print(f"    Token 前8位: {config.tushare_token[:8]}...")
     
     print(f"  Gemini API Key: {'已配置 ✓' if config.gemini_api_key else '未配置 ✗'}")
-    if config.gemini_api_key:
-        print(f"    Key 前8位: {config.gemini_api_key[:8]}...")
     print(f"  Gemini 主模型: {config.gemini_model}")
     print(f"  Gemini 备选模型: {config.gemini_model_fallback}")
     

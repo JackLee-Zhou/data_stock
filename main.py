@@ -95,9 +95,10 @@ def _warn_if_public_webui_without_auth(host: str) -> None:
     if is_auth_enabled():
         return
     logger.warning(
-        "WEBUI_HOST=%s binds the Web UI to a public interface while "
-        "ADMIN_AUTH_ENABLED=false. Keep this service behind a trusted network "
-        "boundary or enable admin authentication before exposing it.",
+        "⚠️  WEBUI_HOST=%s 绑定公网接口，但 ADMIN_AUTH_ENABLED=false！\n"
+        "    任何人访问 http://<服务器IP>:8000 都能查看报告、修改配置、读取 API 密钥。\n"
+        "    生产环境请设置 ADMIN_AUTH_ENABLED=true 并配置强密码。\n"
+        "    详见 docs/SECURITY_REVIEW.md P2-5。",
         host,
     )
 
