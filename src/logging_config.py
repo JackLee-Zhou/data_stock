@@ -12,6 +12,7 @@
 
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -47,6 +48,36 @@ class RelativePathFormatter(logging.Formatter):
             pass
         return super().format(record)
 
+
+
+class SensitiveDataFilter(logging.Filter):
+    """全局日志过滤器：自动脱敏 API Key、Token 等凭证信息"""
+
+    _CREDENTIAL_PATTERNS = [
+        # DeepSeek / OpenAI / generic API key: sk-xxx 或 sk-xxx 格式
+        (r'(sk-[a-zA-Z0-9_-]{10,60})', 'sk-***'),
+        # Bearer token
+        (r'(bearer\s+)[a-zA-Z0-9._\-+=]{20,}', r'\1***'),
+        # Tushare token / hex token (32+ hex chars)
+        (r'([a-f0-9]{32,64})', lambda m: m.group()[:4] + '***' if _looks_like_token(m.group()) else m.group()),
+    ]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        for pattern, replacement in self._CREDENTIAL_PATTERNS:
+            msg = re.sub(pattern, replacement, msg, flags=re.IGNORECASE)
+        record.msg = msg
+        record.args = ()  # 避免 args 二次格式化
+        return True
+
+
+def _looks_like_token(s: str) -> bool:
+    """启发式判断 hex 字符串是否为 token（非普通日志内容）"""
+    # 排除常见的非 token hex 值
+    return not any(
+        kw in s.lower()
+        for kw in ('timeout', 'connect', 'retry', 'error', 'post', 'head', 'body')
+    )
 
 
 # 默认需要降低日志级别的第三方库
@@ -124,6 +155,10 @@ def setup_logging(
     # 清除已有 handler，避免重复添加
     if root_logger.handlers:
         root_logger.handlers.clear()
+
+    # 全局日志脱敏：自动遮盖 API Key、Token 等凭证
+    root_logger.addFilter(SensitiveDataFilter())
+
     # 创建相对路径 Formatter（相对于项目根目录）
     project_root = Path.cwd()
     rel_formatter = RelativePathFormatter(

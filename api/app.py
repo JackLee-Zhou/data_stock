@@ -262,6 +262,15 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
     add_auth_middleware(app)
 
     # 请求日志中间件：记录每个 API 调用的方法、路径、耗时、状态码、客户端 IP
+    # 自动脱敏 URL 中的敏感参数（api_key, token 等）
+    _SENSITIVE_PARAMS = re.compile(
+        r'([?&](?:api[_-]?key|token|secret|password|auth|key)=)[^&\s]+',
+        re.IGNORECASE,
+    )
+
+    def _sanitize_path(path: str) -> str:
+        return _SENSITIVE_PARAMS.sub(r'\1***', path)
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.time()
@@ -269,14 +278,17 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         elapsed_ms = int((time.time() - start) * 1000)
         client_ip = (
             request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.client.host if request.client else "-"
+            or (request.client.host if request.client else "-")
         )
         user = getattr(request.state, "username", None) or "-"
         logger.info(
             "%s %s %d %dms client=%s user=%s",
-            request.method, request.url.path,
-            response.status_code, elapsed_ms,
-            client_ip, user,
+            request.method,
+            _sanitize_path(request.url.path + (f"?{request.url.query}" if request.url.query else "")),
+            response.status_code,
+            elapsed_ms,
+            client_ip,
+            user,
         )
         return response
 
