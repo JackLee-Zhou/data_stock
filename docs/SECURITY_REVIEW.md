@@ -111,11 +111,11 @@
 - **风险**: `CORS_ALLOW_ALL=true` 且 `allow_headers=["*"]` 时完全开放跨域访问
 - **修复**: 生产环境强制关闭 `CORS_ALLOW_ALL`，仅允许白名单域名；添加环境变量 `CORS_ALLOW_ALL` 的安全校验
 
-### P2-4: 缺少 CSP 头
+### P2-4: 缺少 CSP 头 ✅ 已修复
 
 - **文件**: `api/app.py`
 - **风险**: 无 Content-Security-Policy 头部，XSS 攻击成功后无额外防护层
-- **修复**: 为 API 响应添加 CSP 头部（至少限制 script-src、object-src）
+- **处理方案**: 添加全局中间件，注入 CSP + X-Content-Type-Options + X-Frame-Options 安全头
 
 ### P2-5: Web 管理界面在无认证时完全暴露
 
@@ -177,10 +177,10 @@
 - **现状**: 数据库以明文 SQLite 文件存储（`data/stock_analysis.db`），含分析结果、持仓、告警规则、聊天记录等。服务器文件系统被突破后可直接读取所有数据
 - **修复**: 使用 SQLite + SQLCipher 加密（`pysqlcipher3`），加密密钥从环境变量 `DATABASE_ENCRYPTION_KEY` 注入，不落盘。配合 P2-9（API Key 不进文件）形成完整的数据静态加密方案
 
-### P3-4: 依赖版本范围过宽
+### P3-4: 依赖版本范围过宽 ✅ 已修复
 
-- **文件**: `requirements.txt:12-70`
-- **修复**: 考虑使用 `requirements.lock` 或固定最小版本 + 上限
+- **文件**: `requirements.txt:27-69`
+- **处理方案**: 所有主要依赖包添加了版本上限（如 `pandas<3.0.0`、`fastapi<1.0.0`），防止大版本跳跃导致不兼容
 
 ### P3-5: Discord @everyone 提及
 
