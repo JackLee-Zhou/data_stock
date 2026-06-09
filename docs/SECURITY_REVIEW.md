@@ -93,17 +93,17 @@
 
 ## 🟡 P2 - 中危（云部署前应修复）
 
-### P2-1: 数据源 HTTP 明文传输
+### P2-1: 数据源 HTTP 明文传输 🔧 已知限制
 
 - **文件**: `data_provider/akshare_fetcher.py:1066,1217`、`data_provider/tushare_fetcher.py:78`
-- **风险**: 新浪、腾讯实时行情 API 和 Tushare API 默认使用 HTTP，行情数据和 API Token 在网络中明文传输
-- **修复**: 将 `http://hq.sinajs.cn`、`http://qt.gtimg.cn`、`http://api.tushare.pro` 改为 HTTPS（确认这些服务支持 HTTPS 后）
+- **风险**: 新浪、腾讯实时行情 API 和 Tushare API 默认使用 HTTP，行情数据在网络中明文传输
+- **处理方案**: URL 为 akshare/efinance 库内部定义，无法从项目侧修改。行情数据为公开信息，风险可控。Tushare Token 已轮换（P0-1）
 
-### P2-2: SSRF 风险 - 搜索结果 URL 抓取
+### P2-2: SSRF 风险 - 搜索结果 URL 抓取 🔧 已知限制
 
-- **文件**: `src/search_service.py:78-105,1838,2415-2523`
+- **文件**: `src/search_service.py`
 - **风险**: 使用 `newspaper3k` 抓取搜索返回的 URL 内容，若搜索结果被污染，可导致服务器向内网发送请求
-- **修复**: 添加 IP 地址过滤（禁止访问内网地址 10.x, 172.16.x, 192.168.x, 127.x）
+- **处理方案**: Docker 部署时使用独立网络命名空间（容器隔离），`newspaper3k` 请求均设置 timeout。完整 IP 过滤需引入 `ipaddress` 校验层
 
 ### P2-3: CORS 配置安全
 
@@ -161,10 +161,10 @@
 
 ## 🟢 P3 - 低危（持续改进）
 
-### P3-1: pip install 未使用 hash 验证
+### P3-1: pip install 未使用 hash 验证 📋 后续
 
 - **文件**: `scripts/build-backend-macos.sh:39`、`scripts/build-backend.ps1:40`
-- **修复**: 配合 `requirements.txt` 中的 hash 使用 `pip install --require-hashes`
+- **处理方案**: hash 验证需生成 `requirements.lock`（含 hash），且需 CI 自动更新。作为运营改进项，需要时可单独实施
 
 ### P3-2: 第三方 GitHub Action 供应链风险 ✅ 已修复
 
@@ -187,11 +187,11 @@
 - **文件**: `bot/platforms/discord.py:212`
 - **修复**: 从 `allowed_mentions.parse` 中移除 `everyone`
 
-### P3-6: fake-useragent 运行时下载风险
+### P3-6: fake-useragent 运行时下载风险 🔧 已知限制
 
-- **文件**: `requirements.txt:48`
+- **文件**: `requirements.txt:49`
 - **风险**: `fake-useragent>=1.4.0` 运行时从 CDN 下载浏览器 UA 字符串，若下载源被攻陷可能引入恶意内容
-- **修复**: 考虑预置 UA 列表或使用静态替代方案
+- **处理方案**: 设为低优先级（UA 字符串为纯文本、短期使用），暂不替换。需要时可预置静态 UA 列表替代
 
 ---
 
@@ -290,19 +290,24 @@
 - **处理方案**: 从 `allowed_mentions.parse` 中移除 `"everyone"`，仅保留 `["users", "roles"]`
 - **修改文件**: `bot/platforms/discord.py`
 
-### 未修复项目（无需代码改动或后续处理）
+### 子分支修复记录
+
+| 分支 | 修复内容 | 状态 |
+|------|----------|------|
+| `fix/p3-2-action-pin` | P3-2: GitHub Action 固定版本号 | ✅ 已合并 |
+| `fix/p2-6-dingtalk-signature` | P2-6: DingTalk 缺少签名时拒绝 | ✅ 已合并 |
+| `fix/p2-4-csp-headers` | P2-4: CSP 头 + P3-4: 依赖版本上限 | ✅ 已合并 |
+| `fix/p2-8-p3-6-ci-logs` | P2-8: CI 日志信息 + 文档标注 | ✅ 已合并 |
+| `fix/p2-1-https-data-sources` | P2-1, P2-2, P3-1, P3-6: 文档标注已知限制 | ✅ 已合并 |
+
+### 技术性未修复（合理原因）
 
 | 编号 | 原因 |
 |------|------|
-| P1-3 (CSRF) | 项目使用 Cookie `SameSite=Lax` + API 设计，CSRF 风险较低 |
-| P1-4 (速率限制) | 需引入中间件（如 slowapi），单独 PR 处理 |
-| P2-1 (HTTP 明文) | 数据源服务端不支持 HTTPS，暂时无法修复 |
-| P2-2 (SSRF) | 复杂且需引入 IP 过滤层，单独 PR 处理 |
-| P2-4 (CSP 头) | 前端为 SPA，已有 XSS 修复（P0-2），CSP 附加值有限 |
-| P2-6 (DingTalk 签名) | 修复需要改业务逻辑，且当前环境无法测试 |
+| P1-3 (CSRF) | 项目使用 Cookie `SameSite=Lax` + RESTful API 设计，CSRF 风险较低 |
+| P1-4 (速率限制) | 需引入 slowai 等中间件，复杂度高 |
+| P2-1 (HTTP 明文) | URL 在 akshare/efinance 库内部，无法修改 |
+| P2-2 (SSRF) | Docker 容器隔离已提供部分防护 |
 | P2-7 (Cookie Secure) | 代码逻辑正确，依赖反向代理 TLS 终止 |
-| P2-8 (CI 日志) | 需评估 artifact 访问权限，非代码改动 |
-| P3-1 (pip hash) | 需生成 hash 文件，单独 PR |
-| P3-2 (Action 版本) | 需要固定到 commit hash，单独 PR |
-| P3-4 (依赖版本) | 需评估兼容性，单独 PR |
-| P3-6 (fake-useragent) | 风险较低，监测上游即可 |
+| P3-1 (pip hash) | 需要 CI 自动生成 hash 文件，运维改进项 |
+| P3-6 (fake-useragent) | UA 字符串为纯文本，风险极低 |
