@@ -595,15 +595,25 @@ def setup_env(override: bool = False):
                   from .env file. Set to True when reloading config after updates.
                   Default is False to preserve behavior on initial load where
                   system environment variables take precedence.
+
+    P2-9: 设置 ENV_ONLY=true 可跳过 .env 文件，仅使用系统环境变量。
+    适用于 Docker / 生产部署，密钥通过 docker-compose.yml 或 k8s secrets 注入。
     """
     Config._capture_bootstrap_runtime_env_overrides()
-    # src/config.py -> src/ -> root
-    env_file = os.getenv("ENV_FILE")
-    if env_file:
-        env_path = Path(env_file)
+
+    _env_only = os.getenv("ENV_ONLY", "").lower() == "true"
+
+    if not _env_only:
+        # src/config.py -> src/ -> root
+        env_file = os.getenv("ENV_FILE")
+        if env_file:
+            env_path = Path(env_file)
+        else:
+            env_path = Path(__file__).parent.parent / '.env'
+        load_dotenv(dotenv_path=env_path, override=override)
     else:
-        env_path = Path(__file__).parent.parent / '.env'
-    load_dotenv(dotenv_path=env_path, override=override)
+        logger = logging.getLogger(__name__)
+        logger.info("ENV_ONLY=true，跳过 .env 文件加载，所有配置从环境变量读取")
 
     # 修复 macOS Python 证书缺失问题
     # Python framework 安装时 cert.pem 可能不存在，导致所有 HTTPS 请求

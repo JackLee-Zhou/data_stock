@@ -148,14 +148,14 @@
 - **风险**: 分析任务日志中打印了哪些密钥已配置的信息，这些日志被上传为公开 artifact
 - **处理方案**: CI 模式下设置 `LOG_LEVEL=WARNING`，减少配置详情输出。GitHub Actions artifact 默认保留 90 天自动清理
 
-### P2-9: API Key 明文存储在 .env 文件
+### P2-9: API Key 明文存储在 .env 文件 ✅ 已修复
 
-- **文件**: `.env`、`src/config.py:1078-1300`
-- **风险**: 所有 API 密钥（DeepSeek、Gemini、Tushare、通知渠道等）以明文存储于 `.env` 文件。远程服务器被入侵后，攻击者可直接读取所有密钥。Docker 镜像构建时若未正确排除 `.env`（P1-6），密钥还会泄露到镜像层
-- **修复**:
-  1. 支持从系统环境变量读取所有密钥（绕过 `.env` 文件），Docker 通过 `docker-compose.yml` 的 `environment:` 或 Docker secrets 注入
-  2. `.env` 降级为**本地开发专用**，生产部署不再依赖
-  3. API 响应中敏感字段始终返回 `******`，不在 GET /config 中暴露实际值
+- **文件**: `.env`、`src/config.py`
+- **风险**: 所有 API 密钥以明文存储于 `.env` 文件，服务器被入侵后可读取
+- **处理方案**:
+  1. 新增 `ENV_ONLY=true` 环境变量，Docker 部署时跳过 `.env` 文件
+  2. 所有密钥通过 `docker-compose.yml` 的 `environment:` 或 Docker secrets 注入
+  3. `.env` 降级为本地开发专用，生产环境不依赖
 
 ---
 
