@@ -16,6 +16,7 @@ export const FuturesDetail: React.FC<Props> = ({ quote, onClose }) => {
   const [kline, setKline] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+
   useEffect(() => {
     setLoading(true);
     futuresApi.getKline(quote.contractCode, 120).then(data => {

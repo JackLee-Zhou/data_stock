@@ -3,7 +3,7 @@
 
 import logging
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime as _dt, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -19,8 +19,8 @@ _LAST_FETCH_TS = 0  # 请求间隔控制，防止被 ban
 
 
 def _classify(code: str, name: str) -> str:
-    """futures_global_spot_em 返回的全是全球期货（CBOT/CME/COMEX等），国内期货需单独API"""
-    return "international"
+    """根据数据源自动分类：Sina主力合约 = 国内，Global = 国际"""
+    return "domestic"  # 当前数据源为 Sina 国内期货
 
 
 def _rate_limit():
@@ -69,30 +69,32 @@ def get_futures_kline(code: str, days: int = Query(120, ge=1, le=365)):
         _rate_limit()
         import akshare as ak
         rows = []
-        # 尝试多个K线接口（全球期货代码不兼容 hist_em）
-        base = "".join(c for c in str(code) if c.isalpha()).upper()  # CL00Y → CL
-        apis = [
-            ("global_hist", lambda: ak.futures_global_hist_em(symbol=base)),
-            ("main_sina", lambda: ak.futures_main_sina(symbol=code, start_date=fetch_start.strftime("%Y%m%d"), end_date=today.strftime("%Y%m%d"))),
-        ]
-        for api_name, fn in apis:
-            try:
-                df = fn()
-                if df is not None and not df.empty:
-                    rows = [
-                        {"trade_date": str(r.get("日期", "")), "open": float(r.get("开盘", r.get("open", 0)) or 0),
-                         "high": float(r.get("最高", r.get("high", 0)) or 0), "low": float(r.get("最低", r.get("low", 0)) or 0),
-                         "close": float(r.get("收盘", r.get("close", 0)) or 0), "volume": float(r.get("成交量", r.get("volume", 0)) or 0),
-                         "open_interest": float(r.get("持仓量", r.get("open_interest", 0)) or 0)}
-                        for _, r in df.iterrows()
-                    ]
-                    if rows:
-                        from_cache = False
-                        break
-            except Exception as exc:
-                logger.debug("期货K线 %s 尝试 %s 失败: %s", code, api_name, exc)
-        if rows:
-            db.save_futures_daily(code, rows)
+        try:
+            df = ak.futures_zh_daily_sina(symbol=code)
+            if df is not None and not df.empty:
+                rows = []
+                for _, r in df.iterrows():
+                    dt_str = str(r.get("日期", ""))
+                    try:
+                        td = _dt.strptime(dt_str, "%Y-%m-%d").date() if len(dt_str) > 10 else _dt.strptime(dt_str, "%Y-%m-%d").date()
+                    except Exception:
+                        td = date.today()
+                    if len(dt_str) == 8:
+                        td = _dt.strptime(dt_str, "%Y%m%d").date()
+                    rows.append({
+                        "trade_date": td,
+                        "open": float(r.get("开盘价", r.get("open", 0)) or 0),
+                        "high": float(r.get("最高价", r.get("high", 0)) or 0),
+                        "low": float(r.get("最低价", r.get("low", 0)) or 0),
+                        "close": float(r.get("收盘价", r.get("close", 0)) or 0),
+                        "volume": float(r.get("成交量", r.get("volume", 0)) or 0),
+                        "open_interest": float(r.get("持仓量", r.get("open_interest", 0)) or 0),
+                    })
+                if rows:
+                    from_cache = False
+                    db.save_futures_daily(code, rows)
+        except Exception as exc:
+            logger.warning("期货K线 %s 拉取失败: %s", code, exc)
 
     # 2. 返回 DB 数据
     klines = db.get_futures_daily(code, days)

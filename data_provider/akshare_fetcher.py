@@ -2069,24 +2069,30 @@ class AkshareFetcher(BaseFetcher):
 
     def get_futures_quotes(self) -> Optional[List[Dict[str, Any]]]:
         """
-        获取国内商品期货实时行情。
+        获取国内商品期货主力合约列表（仅名称，不含行情）。
 
-        数据源：东方财富全球期货现货（futures_global_spot_em），过滤国内交易所品种。
+        行情数据在用户点击合约 → K线详情时按需拉取 + 增量保存到 futures_daily 表。
+        这样列表页 1 次请求秒出，不会因批量行情拉取等待 80s。
         """
         import akshare as ak
 
         try:
             self._set_random_user_agent()
             self._enforce_rate_limit()
-
-            logger.info("[API调用] ak.futures_global_spot_em() 获取期货实时行情...")
-            df = ak.futures_global_spot_em()
-            if df is not None and not df.empty:
-                return self._normalize_futures_data(df)
+            logger.info("[API调用] ak.futures_display_main_sina() 获取合约列表...")
+            contracts = ak.futures_display_main_sina()
+            if contracts is None or contracts.empty:
+                return None
+            items = []
+            for _, row in contracts.iterrows():
+                s = str(row.get("symbol", "")).strip()
+                n = str(row.get("name", "")).strip()
+                if s and n:
+                    items.append({"contract_code": s, "contract_name": n, "market": "domestic"})
+            return items
         except Exception as e:
-            logger.warning("[Akshare] 期货实时行情接口失败: %s", e)
-
-        return None
+            logger.warning("[Akshare] 期货合约列表获取失败: %s", e)
+            return None
 
     @staticmethod
     def _normalize_futures_data(df) -> List[Dict[str, Any]]:

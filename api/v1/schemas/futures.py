@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 
 class FuturesQuote(BaseModel):
-    contract_code: str = Field(..., description="合约代码")
-    contract_name: str = Field(..., description="合约名称")
-    last_price: float = Field(..., description="最新价")
+    contract_code: str = Field("", description="合约代码")
+    contract_name: str = Field("", description="合约名称")
+    last_price: float = Field(0.0, description="最新价")
     change: float = Field(0.0, description="涨跌额")
     change_pct: float = Field(0.0, description="涨跌幅(%)")
     volume: int = Field(0, description="成交量")
@@ -17,7 +17,7 @@ class FuturesQuote(BaseModel):
     low: Optional[float] = Field(None, description="最低价")
     open: Optional[float] = Field(None, description="开盘价")
     prev_close: Optional[float] = Field(None, description="昨收价")
-    market: str = Field("international", description="domestic/international")
+    market: str = Field("domestic", description="domestic/international")
 
 
 class FuturesListResponse(BaseModel):
