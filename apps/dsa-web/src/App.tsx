@@ -23,6 +23,7 @@ const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
 const FuturesPage = lazy(() => import('./pages/FuturesPage'));
 const SectorChainPage = lazy(() => import('./pages/SectorChainPage'));
+const ShadowAccountPage = lazy(() => import('./pages/ShadowAccountPage'));
 
 const AppContent: React.FC = () => {
   const location = useLocation();
@@ -87,6 +88,7 @@ const AppContent: React.FC = () => {
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/futures" element={<FuturesPage />} />
         <Route path="/sector-chain" element={<SectorChainPage />} />
+        <Route path="/shadow-account" element={<ShadowAccountPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
