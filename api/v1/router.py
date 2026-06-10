@@ -11,7 +11,7 @@ API v1 路由聚合
 
 from fastapi import APIRouter
 
-from api.v1.endpoints import alerts, analysis, auth, futures, history, sector_chain, stocks, backtest, system_config, agent, usage, portfolio, alphasift, health
+from api.v1.endpoints import alerts, analysis, auth, futures, hedge_fund, history, sector_chain, stocks, backtest, system_config, agent, usage, portfolio, alphasift, health
 
 # 创建 v1 版本主路由
 router = APIRouter(prefix="/api/v1")
@@ -97,4 +97,10 @@ router.include_router(
     sector_chain.router,
     prefix="/sector-chain",
     tags=["SectorChain"]
+)
+
+router.include_router(
+    hedge_fund.router,
+    prefix="/hedge-fund",
+    tags=["HedgeFund"]
 )
