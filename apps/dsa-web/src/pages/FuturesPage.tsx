@@ -43,13 +43,14 @@ const FuturesPage: React.FC = () => {
       {/* Tabs */}
       <div className="flex gap-2">
         {[
-          ['international', '国际期货'],
-          ['domestic', '国内期货'],
+          ['international', '全球期货'],
+          ['domestic', '国内期货 (接入中)'],
         ].map(([key, label]) => (
           <button
             key={key}
             onClick={() => setTab(key as Tab)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === key ? 'bg-accent text-white' : 'bg-surface-hover text-secondary-text hover:text-foreground'}`}
+            disabled={key === 'domestic'}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${key === 'domestic' ? 'opacity-50 cursor-not-allowed' : ''} ${tab === key ? 'bg-accent text-white' : 'bg-surface-hover text-secondary-text hover:text-foreground'}`}
           >
             {label}
           </button>
