@@ -829,6 +829,40 @@ class StockIndex(Base):
     )
 
 
+class DecisionLog(Base):
+    """AI 决策日志（每次分析周期一条）"""
+    __tablename__ = 'decision_log'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cycle_id = Column(String(32), nullable=False, index=True)
+    market = Column(String(8), nullable=False)
+    code = Column(String(16), nullable=False, index=True)
+    analyst_ms = Column(Integer, default=0)
+    debate_ms = Column(Integer, default=0)
+    risk_ms = Column(Integer, default=0)
+    manager_ms = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    decision = Column(String(8))
+    confidence = Column(Integer, default=0)
+    stop_loss = Column(Float); position_size = Column(Float)
+    signal_detail = Column(Text)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    __table_args__ = (Index('ix_decision_cycle', 'cycle_id'),)
+
+
+class RiskConfig(Base):
+    """风控配置（用户自定义）"""
+    __tablename__ = 'risk_config'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    market = Column(String(8), nullable=False, default='futures')
+    single_loss_pct = Column(Float, default=1.0)
+    daily_loss_pct = Column(Float, default=3.0)
+    max_drawdown_pct = Column(Float, default=10.0)
+    max_consecutive_failures = Column(Integer, default=3)
+    enabled = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (UniqueConstraint('market', name='uix_risk_market'),)
+
+
 class CtpTick(Base):
     """CTP 实时行情 Tick（每500ms推送一次）"""
     __tablename__ = 'ctp_tick'

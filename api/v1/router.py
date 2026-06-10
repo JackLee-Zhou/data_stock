@@ -11,7 +11,7 @@ API v1 路由聚合
 
 from fastapi import APIRouter
 
-from api.v1.endpoints import alerts, analysis, auth, ctp, ctp_trade, futures, hedge_fund, history, sector_chain, shadow_account, stocks, backtest, system_config, agent, usage, portfolio, alphasift, health
+from api.v1.endpoints import alerts, analysis, auth, ctp, ctp_trade, decision, futures, hedge_fund, history, sector_chain, shadow_account, stocks, backtest, system_config, agent, usage, portfolio, alphasift, health
 
 # 创建 v1 版本主路由
 router = APIRouter(prefix="/api/v1")
@@ -115,6 +115,12 @@ router.include_router(
     ctp_trade.router,
     prefix="/ctp",
     tags=["CTP-Trade"]
+)
+
+router.include_router(
+    decision.router,
+    prefix="/decision",
+    tags=["Decision"]
 )
 
 router.include_router(
