@@ -829,6 +829,19 @@ class StockIndex(Base):
     )
 
 
+class CtpTick(Base):
+    """CTP 实时行情 Tick（每500ms推送一次）"""
+    __tablename__ = 'ctp_tick'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(16), nullable=False, index=True)
+    trade_time = Column(DateTime, nullable=False, index=True)
+    price = Column(Float)
+    bid1 = Column(Float); ask1 = Column(Float)
+    volume = Column(Float); open_interest = Column(Float)
+    created_at = Column(DateTime, default=datetime.now)
+    __table_args__ = (Index('ix_ctp_tick_code_time', 'code', 'trade_time'),)
+
+
 class FuturesDaily(Base):
     """期货日K线数据"""
     __tablename__ = 'futures_daily'
