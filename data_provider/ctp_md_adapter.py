@@ -58,31 +58,37 @@ class CtpMdAdapter:
         try:
             from openctp_ctp import mdapi
 
+            # 继承 CThostFtdcMdSpi 以接收回调
+            class _MdSpiImpl(mdapi.CThostFtdcMdSpi):
+                def __init__(_self, adapter):
+                    mdapi.CThostFtdcMdSpi.__init__(_self)
+                    _self._adapter = adapter
+                def OnFrontConnected(_self): _self._adapter.OnFrontConnected()
+                def OnFrontDisconnected(_self, r): _self._adapter.OnFrontDisconnected(r)
+                def OnRspUserLogin(_self, d, e, r, l): _self._adapter.OnRspUserLogin(d, e, r, l)
+                def OnRtnDepthMarketData(_self, d): _self._adapter.OnRtnDepthMarketData(d)
+
+            self._spi = _MdSpiImpl(self)
             self._api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi()
             self._status.front_address = front_addr
+            self._broker_id = broker_id
+            self._user_id = user_id
+            self._password = password
 
-            # 注册回调
             self._api.RegisterFront(front_addr)
-            self._api.RegisterSpi(self)
-
+            self._api.RegisterSpi(self._spi)
             self._api.Init()
-            _time.sleep(1)
 
-            # 登录
-            req = mdapi.CThostFtdcReqUserLoginField()
-            req.BrokerID = broker_id
-            req.UserID = user_id
-            req.Password = password
-            self._request_id += 1
-            ret = self._api.ReqUserLogin(req, self._request_id)
-            if ret != 0:
-                logger.error("[CTP-MD] 登录请求失败: ret=%d", ret)
+            # 等待连接建立（异步）
+            for _ in range(10):
+                _time.sleep(0.5)
+                if self._connected:
+                    break
+
+            if not self._connected:
+                logger.error("[CTP-MD] 连接超时")
+                self._status.last_error = "连接超时"
                 return False
-
-            _time.sleep(0.5)
-            self._connected = True
-            self._status.connected = True
-            self._status.logged_in = True
 
             # 启动 tick 刷盘线程
             self._start_flusher()
@@ -118,6 +124,15 @@ class CtpMdAdapter:
     def OnFrontConnected(self):
         logger.info("[CTP-MD] 行情前置连接成功")
         self._status.connected = True
+        self._connected = True
+        # 连接成功后自动登录
+        from openctp_ctp import mdapi
+        req = mdapi.CThostFtdcReqUserLoginField()
+        req.BrokerID = getattr(self, '_broker_id', '9999')
+        req.UserID = getattr(self, '_user_id', '')
+        req.Password = getattr(self, '_password', '')
+        self._request_id += 1
+        self._api.ReqUserLogin(req, self._request_id)
 
     def OnFrontDisconnected(self, reason: int):
         logger.warning("[CTP-MD] 行情前置断开: reason=%d", reason)

@@ -3,6 +3,7 @@
 
 import logging
 import os
+from typing import Optional
 
 from data_provider.ctp_md_adapter import CtpMdAdapter
 from data_provider.ctp_types import CtpQuote, CtpStatus
