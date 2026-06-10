@@ -863,6 +863,23 @@ class RiskConfig(Base):
     __table_args__ = (UniqueConstraint('market', name='uix_risk_market'),)
 
 
+class NewsEvent(Base):
+    """新闻事件（多源聚合）"""
+    __tablename__ = 'news_event'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(500), nullable=False)
+    source = Column(String(32))  # google/x/rss/akshare
+    url = Column(String(1000))
+    sentiment = Column(String(16))  # bullish/bearish/neutral
+    urgency = Column(String(16))  # high/medium/low
+    affected_contracts = Column(Text)  # JSON: ["CU0","RB0"]
+    relevance_score = Column(Integer, default=0)
+    summary = Column(Text)
+    published_at = Column(DateTime, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    __table_args__ = (Index('ix_news_contracts_time', 'published_at'),)
+
+
 class CtpTick(Base):
     """CTP 实时行情 Tick（每500ms推送一次）"""
     __tablename__ = 'ctp_tick'
