@@ -65,7 +65,11 @@ export const FuturesDetail: React.FC<Props> = ({ quote, onClose }) => {
           </div>
         ))}
       </div>
-      {loading ? <Loading label="K线加载中…" /> : <div ref={chartRef} />}
+      {loading ? <Loading label="K线加载中…" /> : kline.length === 0 ? (
+        <div className="flex items-center justify-center h-[400px] rounded-lg bg-surface-hover text-sm text-secondary-text">
+          全球期货K线数据暂不可用（数据源接口受限，国内期货即将接入）
+        </div>
+      ) : <div ref={chartRef} />}
     </div>
   );
 };
