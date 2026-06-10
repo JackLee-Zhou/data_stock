@@ -3,6 +3,7 @@ import { TrendingUp } from 'lucide-react';
 import { futuresApi } from '../api/futures';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { AppPage, PageHeader, SectionCard, Loading, EmptyState } from '../components/common';
+import { CtpStatusBar } from '../components/ctp/CtpStatusBar';
 import type { FuturesQuote } from '../types/futures';
 import { FuturesTable } from '../components/futures/FuturesTable';
 import { FuturesDetail } from '../components/futures/FuturesDetail';
@@ -11,7 +12,7 @@ type Tab = 'domestic' | 'international';
 
 const FuturesPage: React.FC = () => {
   const { t } = useUiLanguage();
-  const [tab, setTab] = useState<Tab>('international');
+  const [tab, setTab] = useState<Tab>('domestic');
   const [items, setItems] = useState<FuturesQuote[]>([]);
   const [allItems, setAllItems] = useState<FuturesQuote[]>([]);
   const [updatedAt, setUpdatedAt] = useState('');
@@ -38,19 +39,18 @@ const FuturesPage: React.FC = () => {
 
   return (
     <AppPage className="space-y-5">
-      <PageHeader title={t('layout.nav.futures')} description="全球期货实时行情 · 点击合约查看K线" />
+      <CtpStatusBar />
+      <PageHeader title={t('layout.nav.futures')} description="国内期货实时行情 · 点击合约查看K线" />
 
       {/* Tabs */}
       <div className="flex gap-2">
         {[
-          ['international', '全球期货'],
-          ['domestic', '国内期货 (接入中)'],
+          ['domestic', '国内期货'],
         ].map(([key, label]) => (
           <button
             key={key}
             onClick={() => setTab(key as Tab)}
-            disabled={key === 'domestic'}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${key === 'domestic' ? 'opacity-50 cursor-not-allowed' : ''} ${tab === key ? 'bg-accent text-white' : 'bg-surface-hover text-secondary-text hover:text-foreground'}`}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === key ? 'bg-accent text-white' : 'bg-surface-hover text-secondary-text hover:text-foreground'}`}
           >
             {label}
           </button>
