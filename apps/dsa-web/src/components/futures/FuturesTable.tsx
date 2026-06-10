@@ -5,6 +5,8 @@ import { cn } from '../../utils/cn';
 
 interface FuturesTableProps {
   items: FuturesQuote[];
+  onSelect?: (item: FuturesQuote) => void;
+  selected?: string;
 }
 
 const formatNum = (v: number | undefined | null, decimals = 2): string => {
@@ -35,7 +37,7 @@ const ChangeCell: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-export const FuturesTable: React.FC<FuturesTableProps> = ({ items }) => {
+export const FuturesTable: React.FC<FuturesTableProps> = ({ items, onSelect, selected }) => {
   const HEADER_CLASS = 'px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-secondary-text';
 
   return (
@@ -55,7 +57,8 @@ export const FuturesTable: React.FC<FuturesTableProps> = ({ items }) => {
           {items.map((item) => (
             <tr
               key={item.contractCode}
-              className="transition-colors hover:bg-surface-hover"
+              className={`transition-colors hover:bg-surface-hover cursor-pointer ${selected === item.contractCode ? 'bg-accent/10' : ''}`}
+              onClick={() => onSelect?.(item)}
             >
               <td className="px-3 py-2.5">
                 <div className="font-medium text-foreground">{item.contractName}</div>

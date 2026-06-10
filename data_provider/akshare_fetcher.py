@@ -2069,94 +2069,73 @@ class AkshareFetcher(BaseFetcher):
 
     def get_futures_quotes(self) -> Optional[List[Dict[str, Any]]]:
         """
-        获取国内商品期货主力合约行情。
+        获取国内商品期货实时行情。
 
-        数据源：新浪财经 futures_main_sina（主力合约）、futures_zh_daily_sina（日频兜底）。
-        返回格式化的合约行情列表，每项包含：
-        contract_code, contract_name, last_price, change, change_pct,
-        volume, open_interest, high, low, open, prev_close
+        数据源：东方财富全球期货现货（futures_global_spot_em），过滤国内交易所品种。
         """
         import akshare as ak
 
-        # 优先尝试主力合约接口
         try:
             self._set_random_user_agent()
             self._enforce_rate_limit()
 
-            logger.info("[API调用] ak.futures_main_sina() 获取期货主力合约...")
-            df = ak.futures_main_sina()
+            logger.info("[API调用] ak.futures_global_spot_em() 获取期货实时行情...")
+            df = ak.futures_global_spot_em()
             if df is not None and not df.empty:
                 return self._normalize_futures_data(df)
         except Exception as e:
-            logger.warning("[Akshare] 期货主力合约接口失败: %s，尝试日频接口...", e)
-
-        # 兜底：尝试日频数据
-        try:
-            self._set_random_user_agent()
-            self._enforce_rate_limit()
-
-            logger.info("[API调用] ak.futures_zh_daily_sina() 获取期货日频数据...")
-            df = ak.futures_zh_daily_sina(symbol="所有")
-            if df is not None and not df.empty:
-                items = self._normalize_futures_data(df)
-                if items:
-                    return items
-        except Exception as e:
-            logger.error("[Akshare] 期货日频接口也失败: %s", e)
+            logger.warning("[Akshare] 期货实时行情接口失败: %s", e)
 
         return None
 
     @staticmethod
     def _normalize_futures_data(df) -> List[Dict[str, Any]]:
         """将 akshare 期货 DataFrame 标准化为统一的 dict 列表。"""
-        import pandas as pd
-
         if df is None or df.empty:
             return []
 
-        # 不同接口列名可能不同，统一映射
+        # 东方财富 global_spot_em 列名映射
         column_map = {
-            # 新浪主力合约接口 (futures_main_sina)
-            "合约代码": "contract_code",
-            "合约名称": "contract_name",
+            "代码": "contract_code",
+            "名称": "contract_name",
             "最新价": "last_price",
             "涨跌额": "change",
             "涨跌幅": "change_pct",
             "成交量": "volume",
             "持仓量": "open_interest",
-            "最高价": "high",
-            "最低价": "low",
-            "开盘价": "open",
-            "昨收价": "prev_close",
-            # 日频接口 (futures_zh_daily_sina) 可能的列名差异
-            "名称": "contract_name",
-            "日期": "trade_date",
-            "收盘价": "last_price",
+            "今开": "open",
+            "最高": "high",
+            "最低": "low",
+            "昨结": "prev_close",
         }
-
-        df_renamed = df.rename(columns=column_map)
+        df = df.rename(columns=column_map)
 
         items: List[Dict[str, Any]] = []
-        for _, row in df_renamed.iterrows():
+        for _, row in df.iterrows():
+            code = str(row.get("contract_code", "")).strip()
+            name = str(row.get("contract_name", "")).strip()
+            price = AkshareFetcher._safe_float(row.get("last_price"))
+
+            # 跳过无效行
+            if not code or not name or price is None or price <= 0:
+                continue
+
             item: Dict[str, Any] = {
-                "contract_code": str(row.get("contract_code", "")).strip(),
-                "contract_name": str(row.get("contract_name", "")).strip(),
-                "last_price": AkshareFetcher._safe_float(row.get("last_price")),
-                "change": AkshareFetcher._safe_float(row.get("change"), default=0.0),
-                "change_pct": AkshareFetcher._safe_float(row.get("change_pct"), default=0.0),
-                "volume": int(AkshareFetcher._safe_float(row.get("volume"), default=0.0)),
-                "open_interest": int(AkshareFetcher._safe_float(row.get("open_interest"), default=0.0)),
+                "contract_code": code,
+                "contract_name": name,
+                "last_price": price,
+                "change": AkshareFetcher._safe_float(row.get("change")) or 0.0,
+                "change_pct": AkshareFetcher._safe_float(row.get("change_pct")) or 0.0,
+                "volume": int(AkshareFetcher._safe_float(row.get("volume")) or 0),
+                "open_interest": int(AkshareFetcher._safe_float(row.get("open_interest")) or 0),
                 "high": AkshareFetcher._safe_float(row.get("high")),
                 "low": AkshareFetcher._safe_float(row.get("low")),
                 "open": AkshareFetcher._safe_float(row.get("open")),
                 "prev_close": AkshareFetcher._safe_float(row.get("prev_close")),
             }
-            # 过滤无代码或无价格的无效行
-            if not item["contract_code"] or item["last_price"] is None or item["last_price"] <= 0:
-                continue
             items.append(item)
 
-        # 按成交量降序排列，优先展示活跃合约
+        # 按成交量降序，优先展示活跃合约
         items.sort(key=lambda x: x.get("volume", 0) or 0, reverse=True)
         return items
 

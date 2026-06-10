@@ -2,95 +2,77 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { TrendingUp } from 'lucide-react';
 import { futuresApi } from '../api/futures';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
-import type { ParsedApiError } from '../api/error';
-import { getParsedApiError } from '../api/error';
-import { AppPage, PageHeader, SectionCard, Loading, EmptyState, InlineAlert } from '../components/common';
-import { FuturesTable } from '../components/futures/FuturesTable';
+import { AppPage, PageHeader, SectionCard, Loading, EmptyState } from '../components/common';
 import type { FuturesQuote } from '../types/futures';
+import { FuturesTable } from '../components/futures/FuturesTable';
+import { FuturesDetail } from '../components/futures/FuturesDetail';
+
+type Tab = 'domestic' | 'international';
 
 const FuturesPage: React.FC = () => {
   const { t } = useUiLanguage();
+  const [tab, setTab] = useState<Tab>('international');
   const [items, setItems] = useState<FuturesQuote[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<string>('');
+  const [allItems, setAllItems] = useState<FuturesQuote[]>([]);
+  const [updatedAt, setUpdatedAt] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ParsedApiError | null>(null);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<FuturesQuote | null>(null);
 
-  const fetchQuotes = useCallback(async () => {
-    let active = true;
-    setLoading(true);
-    setError(null);
+  const fetchAll = useCallback(async () => {
+    setLoading(true); setError('');
     try {
       const data = await futuresApi.getQuotes();
-      if (active) {
-        setItems(data.items);
-        setUpdatedAt(data.updatedAt);
-      }
-    } catch (err) {
-      if (active) {
-        setError(getParsedApiError(err));
-      }
-    } finally {
-      if (active) setLoading(false);
-    }
-    return () => { active = false; };
+      setAllItems(data.items);
+      setUpdatedAt(data.updatedAt);
+    } catch (e: any) { setError(e?.message || '加载失败'); }
+    finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    const cleanup = fetchQuotes();
-    return () => { void cleanup.then((fn) => fn?.()); };
-  }, [fetchQuotes]);
+  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => { document.title = `${t('layout.nav.futures')} — DSA`; }, [t]);
 
   useEffect(() => {
-    document.title = `${t('layout.nav.futures')} — DSA`;
-  }, [t]);
-
-  const formatTime = (isoStr: string): string => {
-    try {
-      const d = new Date(isoStr);
-      return d.toLocaleString('zh-CN', { hour12: false });
-    } catch {
-      return isoStr;
-    }
-  };
+    setItems(allItems.filter(i => i.market === tab));
+  }, [tab, allItems]);
 
   return (
     <AppPage className="space-y-5">
-      <PageHeader
-        title={t('layout.nav.futures')}
-        description="国内商品期货主力合约实时行情"
-      />
+      <PageHeader title={t('layout.nav.futures')} description="全球期货实时行情 · 点击合约查看K线" />
+
+      {/* Tabs */}
+      <div className="flex gap-2">
+        {[
+          ['international', '国际期货'],
+          ['domestic', '国内期货'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key as Tab)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === key ? 'bg-accent text-white' : 'bg-surface-hover text-secondary-text hover:text-foreground'}`}
+          >
+            {label}
+          </button>
+        ))}
+        {updatedAt && <span className="self-center ml-auto text-xs text-tertiary-text">更新: {new Date(updatedAt).toLocaleTimeString('zh-CN')}</span>}
+      </div>
 
       {loading && <Loading label="加载期货行情…" />}
-
-      {!loading && error && (
-        <SectionCard title="行情加载失败">
-          <InlineAlert
-            variant="danger"
-            title={error.title || '加载失败'}
-            message={error.message}
-            action={<button type="button" className="text-sm font-medium text-accent hover:underline" onClick={() => { void fetchQuotes(); }}>重试</button>}
-          />
-        </SectionCard>
-      )}
-
-      {!loading && !error && items.length === 0 && (
-        <SectionCard title="暂无数据">
-          <EmptyState
-            icon={<TrendingUp className="h-10 w-10" />}
-            title="暂无期货行情"
-            description="当前没有可用的期货行情数据，请稍后刷新重试。"
-            action={<button type="button" className="text-sm font-medium text-accent hover:underline" onClick={() => { void fetchQuotes(); }}>刷新</button>}
-          />
-        </SectionCard>
-      )}
-
+      {!loading && error && <SectionCard title="加载失败"><p className="text-sm text-red-500">{error}</p></SectionCard>}
+      {!loading && !error && items.length === 0 && <EmptyState icon={<TrendingUp className="h-10 w-10" />} title="暂无数据" />}
       {!loading && !error && items.length > 0 && (
-        <SectionCard
-          title={`主力合约 (${items.length})`}
-          subtitle={updatedAt ? `更新时间: ${formatTime(updatedAt)}` : undefined}
-        >
-          <FuturesTable items={items} />
-        </SectionCard>
+        <div className="flex gap-4">
+          <div className={selected ? 'w-1/2' : 'w-full'}>
+            <SectionCard title={`${tab === 'domestic' ? '国内' : '国际'}合约 (${items.length})`}>
+              <FuturesTable items={items} onSelect={setSelected} selected={selected?.contractCode} />
+            </SectionCard>
+          </div>
+          {selected && (
+            <div className="w-1/2">
+              <FuturesDetail quote={selected} onClose={() => setSelected(null)} />
+            </div>
+          )}
+        </div>
       )}
     </AppPage>
   );

@@ -829,6 +829,26 @@ class StockIndex(Base):
     )
 
 
+class FuturesDaily(Base):
+    """期货日K线数据"""
+    __tablename__ = 'futures_daily'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(16), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+    volume = Column(Float)
+    open_interest = Column(Float)
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('code', 'trade_date', name='uix_futures_code_date'),
+    )
+
+
 class _DatabaseManagerMeta(type):
     """Serialize DatabaseManager construction across __new__ and __init__."""
 
@@ -2006,6 +2026,61 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             logger.error(f"保存 {code} 数据失败: {e}")
             raise
     
+    # ── Futures K-line ────────────────────────────────
+
+    def get_futures_latest_date(self, code: str) -> Optional[date]:
+        """获取某合约K线的最新日期（用于增量判断）。"""
+        from sqlalchemy import func
+        with self.session_scope() as s:
+            result = (
+                s.query(func.max(FuturesDaily.trade_date))
+                .filter(FuturesDaily.code == code)
+                .scalar()
+            )
+            return result
+
+    def save_futures_daily(self, code: str, rows: List[Dict[str, Any]]) -> int:
+        """批量保存期货日K线（INSERT OR IGNORE）。"""
+        if not rows:
+            return 0
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        with self.session_scope() as s:
+            count = 0
+            for row in rows:
+                stmt = sqlite_insert(FuturesDaily).values(
+                    code=code,
+                    trade_date=row.get("trade_date"),
+                    open=row.get("open"),
+                    high=row.get("high"),
+                    low=row.get("low"),
+                    close=row.get("close"),
+                    volume=row.get("volume"),
+                    open_interest=row.get("open_interest"),
+                ).on_conflict_do_nothing(index_elements=["code", "trade_date"])
+                s.execute(stmt)
+                count += 1
+            return count
+
+    def get_futures_daily(self, code: str, days: int = 120) -> List[Dict[str, Any]]:
+        """获取合约日K线（最近 N 条）。"""
+        with self.session_scope() as s:
+            rows = (
+                s.query(FuturesDaily)
+                .filter(FuturesDaily.code == code)
+                .order_by(FuturesDaily.trade_date.desc())
+                .limit(days)
+                .all()
+            )
+            return [
+                {
+                    "trade_date": str(r.trade_date) if r.trade_date else "",
+                    "open": r.open, "high": r.high, "low": r.low,
+                    "close": r.close, "volume": r.volume or 0,
+                    "open_interest": r.open_interest or 0,
+                }
+                for r in reversed(rows)
+            ]
+
     # ── Watchlist (自选股) ────────────────────────────
 
     def get_watchlist(self, name: str = "default") -> List[str]:
