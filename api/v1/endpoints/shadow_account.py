@@ -117,26 +117,32 @@ def get_shadow_positions():
     db = DatabaseManager()
     with db.session_scope() as s:
         from src.storage import PortfolioTrade
-        trades = (
+        rows = (
             s.query(PortfolioTrade)
             .filter(PortfolioTrade.account_id == acct["id"])
             .order_by(PortfolioTrade.trade_date)
             .all()
         )
+        # 提取数据（避免 session 关闭后 DetachedInstanceError）
+        trades = [
+            {"symbol": r.symbol, "side": r.side, "quantity": r.quantity or 0, "price": r.price or 0}
+            for r in rows
+        ]
+
     # 汇总持仓
     positions: dict = {}
     for t in trades:
-        sym = t.symbol
+        sym = t["symbol"]
         if sym not in positions:
             positions[sym] = {"symbol": sym, "quantity": 0, "total_cost": 0}
-        if t.side == "buy":
-            positions[sym]["quantity"] += t.quantity or 0
-            positions[sym]["total_cost"] += (t.quantity or 0) * (t.price or 0)
+        if t["side"] == "buy":
+            positions[sym]["quantity"] += t["quantity"]
+            positions[sym]["total_cost"] += t["quantity"] * t["price"]
         else:
             if positions[sym]["quantity"] > 0:
                 avg_cost = positions[sym]["total_cost"] / positions[sym]["quantity"]
-                positions[sym]["total_cost"] -= (t.quantity or 0) * avg_cost
-            positions[sym]["quantity"] -= t.quantity or 0
+                positions[sym]["total_cost"] -= t["quantity"] * avg_cost
+            positions[sym]["quantity"] -= t["quantity"]
 
     result = []
     for pos in positions.values():
@@ -155,24 +161,20 @@ def get_shadow_history(limit: int = Query(50)):
     db = DatabaseManager()
     with db.session_scope() as s:
         from src.storage import PortfolioTrade
-        trades = (
+        rows = (
             s.query(PortfolioTrade)
             .filter(PortfolioTrade.account_id == acct["id"])
             .order_by(PortfolioTrade.trade_date.desc())
             .limit(limit)
             .all()
         )
-    return {
-        "trades": [
+        trades = [
             {
-                "id": t.id,
-                "symbol": t.symbol,
-                "side": t.side,
-                "quantity": t.quantity,
-                "price": t.price,
-                "date": str(t.trade_date) if t.trade_date else None,
-                "note": t.note,
+                "id": r.id, "symbol": r.symbol, "side": r.side,
+                "quantity": r.quantity, "price": r.price,
+                "date": str(r.trade_date) if r.trade_date else None,
+                "note": r.note,
             }
-            for t in trades
+            for r in rows
         ]
-    }
+    return {"trades": trades}
