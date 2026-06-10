@@ -7,7 +7,7 @@ import { analysisApi } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, EmptyState, InlineAlert } from '../components/common';
+import { ApiErrorAlert, Button, EmptyState, InlineAlert, Loading } from '../components/common';
 import { DashboardStateBlock } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { StockHistoryTrendDrawer, StockBar } from '../components/history';
@@ -398,6 +398,19 @@ const HomePage: React.FC = () => {
       skills: selectedAnalysisSkills,
     });
   }, [selectedAnalysisSkills, selectedReport, submitAnalysis]);
+
+  const [mastersResult, setMastersResult] = useState<any>(null);
+  const [mastersLoading, setMastersLoading] = useState(false);
+  const handleMastersAnalysis = useCallback(async () => {
+    if (!selectedReport) return;
+    setMastersLoading(true);
+    try {
+      const r = await fetch(`/api/v1/hedge-fund/analyze?stock_code=${selectedReport.meta.stockCode}`, { method: 'POST' });
+      const data = await r.json();
+      setMastersResult(data);
+    } catch (e) { console.error(e); }
+    finally { setMastersLoading(false); }
+  }, [selectedReport]);
 
   const pollMarketReviewStatus = useCallback(
     async (taskId: string) => {
@@ -855,6 +868,14 @@ const HomePage: React.FC = () => {
                       <Button
                         variant="home-action-ai"
                         size="sm"
+                        disabled={isAnalyzing || selectedReport.meta.id === undefined}
+                        onClick={handleMastersAnalysis}
+                      >
+                        🧠 大师会诊
+                      </Button>
+                      <Button
+                        variant="home-action-ai"
+                        size="sm"
                         disabled={selectedReport.meta.id === undefined}
                         onClick={handleAskFollowUp}
                       >
@@ -905,6 +926,28 @@ const HomePage: React.FC = () => {
                     {t('home.fullReport')}
                   </Button>
                 </div>
+                {/* 大师会诊结果 */}
+                {mastersLoading && <div className="text-sm text-secondary-text mt-4"><Loading label="大师会诊分析中…" /></div>}
+                {mastersResult && !mastersLoading && (
+                  <div className="mt-4 rounded-xl border border-border bg-surface p-4">
+                    <h3 className="text-sm font-semibold mb-2">🧠 大师会诊 — {mastersResult.stock_code}</h3>
+                    <div className="text-xs text-secondary-text mb-2">
+                      综合信号: <span className={`font-bold ${mastersResult.aggregated.signal === 'bullish' ? 'text-emerald-600' : mastersResult.aggregated.signal === 'bearish' ? 'text-red-500' : 'text-amber-500'}`}>{mastersResult.aggregated.signal === 'bullish' ? '看涨' : mastersResult.aggregated.signal === 'bearish' ? '看跌' : '中性'}</span>
+                      &nbsp;| 信心 {mastersResult.aggregated.confidence}%
+                      &nbsp;| 看涨{mastersResult.aggregated.bullish_count} 看跌{mastersResult.aggregated.bearish_count} 中性{mastersResult.aggregated.neutral_count}
+                    </div>
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {Object.entries(mastersResult.masters as Record<string, any>).map(([id, m]: [string, any]) => (
+                        <div key={id} className="flex items-center gap-2 text-xs">
+                          <span className={`w-1.5 h-1.5 rounded-full ${m.signal === 'bullish' ? 'bg-emerald-500' : m.signal === 'bearish' ? 'bg-red-500' : 'bg-amber-500'}`} />
+                          <span className="font-medium w-24 truncate">{m.name}</span>
+                          <span className="tabular-nums w-10 text-right">{m.confidence}%</span>
+                          {m.reasoning && <span className="text-secondary-text truncate flex-1">{m.reasoning}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {isHistoryTrendOpen ? (
                   <StockHistoryTrendDrawer
                     key={`stock-history-${selectedReport.meta.id}`}
