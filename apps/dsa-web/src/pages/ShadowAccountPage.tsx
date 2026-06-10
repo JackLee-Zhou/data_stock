@@ -29,6 +29,21 @@ const ShadowAccountPage: React.FC = () => {
   useEffect(() => { void fetchAll(); }, [fetchAll]);
   useEffect(() => { document.title = `${t('layout.nav.shadowAccount')} — DSA`; }, [t]);
 
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+  const handleSymbolBlur = async () => {
+    const sym = tradeForm.symbol.trim();
+    if (!sym || sym.length < 4) return;
+    setFetchingPrice(true);
+    try {
+      const r = await fetch(`/api/v1/stocks/${sym.toUpperCase()}/quote`);
+      if (r.ok) {
+        const data = await r.json();
+        if (data.price) setTradeForm(f => ({ ...f, symbol: sym.toUpperCase(), price: data.price }));
+      }
+    } catch {}
+    finally { setFetchingPrice(false); }
+  };
+
   const handleTrade = async () => {
     if (!tradeForm.symbol || tradeForm.price <= 0) return;
     try {
@@ -67,10 +82,10 @@ const ShadowAccountPage: React.FC = () => {
       {/* 下单 */}
       <SectionCard title="模拟交易">
         <div className="flex flex-wrap items-end gap-3">
-          <div><label className="text-xs text-secondary-text">代码</label><input className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm" value={tradeForm.symbol} onChange={e => setTradeForm({ ...tradeForm, symbol: e.target.value })} placeholder="600519" /></div>
+          <div><label className="text-xs text-secondary-text">代码</label><input className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm" value={tradeForm.symbol} onChange={e => setTradeForm({ ...tradeForm, symbol: e.target.value })} onBlur={handleSymbolBlur} placeholder="600519" /></div>
           <div><label className="text-xs text-secondary-text">方向</label><select className="rounded-lg border border-border bg-surface px-3 py-2 text-sm" value={tradeForm.side} onChange={e => setTradeForm({ ...tradeForm, side: e.target.value })}><option value="buy">买入</option><option value="sell">卖出</option></select></div>
           <div><label className="text-xs text-secondary-text">数量</label><input type="number" className="w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm" value={tradeForm.quantity} onChange={e => setTradeForm({ ...tradeForm, quantity: +e.target.value })} /></div>
-          <div><label className="text-xs text-secondary-text">价格</label><input type="number" className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-sm" value={tradeForm.price || ''} onChange={e => setTradeForm({ ...tradeForm, price: +e.target.value })} placeholder="市价" /></div>
+          <div><label className="text-xs text-secondary-text">价格 {fetchingPrice && '⏳'}</label><input type="number" className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-sm" value={tradeForm.price || ''} onChange={e => setTradeForm({ ...tradeForm, price: +e.target.value })} placeholder={fetchingPrice ? "获取中..." : "自动/手动"} /></div>
           <Button variant="primary" size="md" onClick={handleTrade} disabled={!tradeForm.symbol || tradeForm.price <= 0}>{tradeForm.side === 'buy' ? '买入' : '卖出'}</Button>
         </div>
       </SectionCard>
