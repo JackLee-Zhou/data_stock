@@ -33,46 +33,15 @@ def _rate_limit():
 
 @router.get("/quotes", response_model=FuturesListResponse)
 def get_futures_quotes(market: Optional[str] = Query(None, description="domestic/international/all")):
-    """期货行情列表 — 优先 CTP 实时数据，fallback akshare"""
-    items = []
-
-    # 优先从 CTP 获取
+    """期货合约列表 + akshare最新行情"""
+    manager = DataFetcherManager()
     try:
-        from src.services.ctp_service import get_quotes as get_ctp_quotes
-        ctp = get_ctp_quotes()
-        for code, q in ctp.items():
-            # 过滤期权（含 -C- 或 -P-），只留期货
-            if '-C-' in code or '-P-' in code:
-                continue
-            price = q.get("price", 0) or 0
-            prev = q.get("prev_close") or price or 0
-            change_pct = ((price - prev) / prev * 100) if prev and price else 0
-            items.append({
-                "contract_code": code, "contract_name": code,
-                "last_price": price, "change": round(price - prev, 4) if prev else 0,
-                "change_pct": round(change_pct, 2),
-                "volume": int(q.get("volume", 0) or 0),
-                "open_interest": int(q.get("open_interest", 0) or 0),
-                "high": q.get("high"), "low": q.get("low"),
-                "open": q.get("open"), "prev_close": q.get("prev_close") or price,
-                "bid1": q.get("bid1"), "ask1": q.get("ask1"),
-                "market": "domestic",
-            })
-    except Exception:
-        pass
-
-    # fallback: akshare
-    if not items:
-        try:
-            manager = DataFetcherManager()
-            raw = manager.get_futures_quotes() or []
-            items = [{**r, "market": _classify(r.get("contract_code", ""), r.get("contract_name", ""))} for r in raw]
-        except Exception:
-            pass
-
+        items_raw = manager.get_futures_quotes() or []
+    except Exception as exc:
+        raise HTTPException(503, detail={"title": "获取失败", "message": str(exc)}) from exc
+    items = [{**r, "market": _classify(r.get("contract_code", ""), r.get("contract_name", ""))} for r in items_raw]
     if market and market != "all":
         items = [i for i in items if i["market"] == market]
-
     return FuturesListResponse(items=[FuturesQuote(**i) for i in items], total=len(items),
                                updated_at=datetime.now(TZ).isoformat())
 
