@@ -158,7 +158,9 @@ class EngineState:
             return batch
 
 state = EngineState()
-tick_queue: Queue = Queue(maxsize=500000)
+tick_queue: Queue = Queue(maxsize=1000000)  # 100万tick ≈ 4小时缓冲
+_dropped_ticks = 0
+_drop_lock = threading.Lock()
 
 
 # ── 按天 SQLite ─────────────────────────────────────
@@ -242,7 +244,11 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
         try:
             tick_queue.put_nowait(tick)
         except Exception:
-            pass
+            global _dropped_ticks
+            with _drop_lock:
+                _dropped_ticks += 1
+                if _dropped_ticks % 1000 == 0:
+                    logger.warning("Queue满! 丢弃 %d ticks", _dropped_ticks)
 
 
 # ── 落库线程 ────────────────────────────────────────
@@ -311,20 +317,20 @@ def daily_refresh_worker(spi: MdSpi):
 
 # ── 推送线程 ────────────────────────────────────────
 def push_worker():
-    """定时向本地服务器推送增量 tick"""
+    """定时向本地服务器推送增量 tick（异步非阻塞）"""
     if not PUSH_URL:
         logger.info("未配置 PUSH_URL，跳过推送")
         return
     logger.info("推送线程启动: %s, 间隔 %ds", PUSH_URL, PUSH_INTERVAL)
     import requests
-    while True:
-        time.sleep(PUSH_INTERVAL)
-        batch = state.pop_pending()
-        if not batch: continue
+    from concurrent.futures import ThreadPoolExecutor
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="push")
+
+    def do_push(batch):
         try:
             resp = requests.post(
                 f"{PUSH_URL}/api/v1/ctp/sync",
-                json={"ticks": batch[-2000:]},  # 最多 2000 条
+                json={"ticks": batch[-2000:]},
                 timeout=10,
             )
             if resp.status_code == 200:
@@ -333,6 +339,12 @@ def push_worker():
                 logger.warning("推送失败: HTTP %d", resp.status_code)
         except Exception as exc:
             logger.warning("推送异常: %s", exc)
+
+    while True:
+        time.sleep(PUSH_INTERVAL)
+        batch = state.pop_pending()
+        if not batch: continue
+        executor.submit(do_push, batch)  # 异步提交，不阻塞循环
 
 
 # ── Console 交互 ────────────────────────────────────
