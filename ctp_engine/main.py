@@ -365,17 +365,17 @@ class CtpConsole(cmd.Cmd):
         """查看引擎状态"""
         with state.lock:
             tc = state.tick_count
-        print(f"  连接: {'✅' if state.connected else '❌'} | 登录: {'✅' if state.logged_in else '❌'}")
-        print(f"  交易日: {state.trading_day}")
-        print(f"  Tick 总数: {tc} | 推送: {state.push_count}")
-        print(f"  Queue: {tick_queue.qsize()} | 订阅: {len(state.codes)}")
+        print(f"  连接: {'✅' if state.connected else '❌'} | 登录: {'✅' if state.logged_in else '❌'}", file=self.stdout, flush=True)
+        print(f"  交易日: {state.trading_day}", file=self.stdout, flush=True)
+        print(f"  Tick 总数: {tc} | 推送: {state.push_count}", file=self.stdout, flush=True)
+        print(f"  Queue: {tick_queue.qsize()} | 订阅: {len(state.codes)}", file=self.stdout, flush=True)
 
     def do_contracts(self, _):
         """列出所有订阅合约"""
         for i, c in enumerate(state.codes):
-            print(f"  {i+1:3d}. {c}", end="")
-            if (i + 1) % 6 == 0: print()
-        print()
+            print(f"  {i+1:3d}. {c}", end="", file=self.stdout, flush=True)
+            if (i + 1) % 6 == 0: print(file=self.stdout, flush=True)
+        print(file=self.stdout, flush=True)
 
     def do_sub(self, arg):
         """增加订阅: sub CU2507,RB2510"""
@@ -384,9 +384,9 @@ class CtpConsole(cmd.Cmd):
         if new_codes:
             state.codes.extend(new_codes)
             self.spi.subscribe_codes(new_codes)
-            print(f"已增加: {new_codes}")
+            print(f"已增加: {new_codes}", file=self.stdout, flush=True)
         else:
-            print("无新增合约")
+            print("无新增合约", file=self.stdout, flush=True)
 
     def do_unsub(self, arg):
         """取消订阅: unsub AU2508"""
@@ -395,13 +395,13 @@ class CtpConsole(cmd.Cmd):
             if c in state.codes:
                 state.codes.remove(c)
         self.spi.unsubscribe_codes(codes)
-        print(f"已取消: {codes}")
+        print(f"已取消: {codes}", file=self.stdout, flush=True)
 
     def do_push(self, arg):
         """推送状态: push status"""
         if arg == "status":
-            print(f"  PUSH_URL: {PUSH_URL or '未配置'}")
-            print(f"  间隔: {PUSH_INTERVAL}s | 累计推送: {state.push_count}")
+            print(f"  PUSH_URL: {PUSH_URL or '未配置'}", file=self.stdout, flush=True)
+            print(f"  间隔: {PUSH_INTERVAL}s | 累计推送: {state.push_count}", file=self.stdout, flush=True)
 
     def do_log(self, _):
         """查看最近日志 (最后10行)"""
@@ -409,9 +409,9 @@ class CtpConsole(cmd.Cmd):
             with open(os.path.join(LOG_DIR, "ctp_engine.log"), 'r') as f:
                 lines = f.readlines()
                 for l in lines[-10:]:
-                    print(l.rstrip())
+                    print(l.rstrip(), file=self.stdout, flush=True)
         except Exception as e:
-            print(f"读取日志失败: {e}")
+            print(f"读取日志失败: {e}", file=self.stdout, flush=True)
 
     def do_quit(self, _):
         """退出引擎"""
