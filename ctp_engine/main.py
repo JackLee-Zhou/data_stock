@@ -482,6 +482,47 @@ class CtpConsole(cmd.Cmd):
         conn.close()
         print(f"\n -- 完 --", file=self.stdout, flush=True)
 
+    def do_size(self, arg):
+        """查看数据大小: size [合约代码]"""
+        code = arg.strip() if arg else None
+        total_size = 0
+        total_ticks = 0
+        files = sorted([f for f in os.listdir(DATA_DIR) if f.endswith('.db')], reverse=True)
+
+        if code:
+            # 查单个合约在每个日库中的条数
+            print(f"\n  {code} 数据统计:", file=self.stdout, flush=True)
+            print(f"  {'日期':<12s} {'Tick数':>10s} {'文件大小':>12s}", file=self.stdout, flush=True)
+            print(f"  {'-'*38}", file=self.stdout, flush=True)
+            for fname in files:
+                db_path = os.path.join(DATA_DIR, fname)
+                fsize = os.path.getsize(db_path)
+                conn = sqlite3.connect(db_path)
+                cnt = conn.execute("SELECT COUNT(*) FROM ctp_tick WHERE code=?", (code,)).fetchone()[0]
+                conn.close()
+                if cnt > 0:
+                    total_ticks += cnt
+                    total_size += fsize
+                    print(f"  {fname.replace('.db',''):<12s} {cnt:>10,d} {fsize:>11,d}B", file=self.stdout, flush=True)
+            print(f"  {'─'*38}", file=self.stdout, flush=True)
+            print(f"  合计: {total_ticks:,d} ticks, {total_size/1024:.1f}KB ({total_size/1024/1024:.1f}MB)", file=self.stdout, flush=True)
+        else:
+            # 总览
+            print(f"\n  {'日期':<12s} {'Tick总数':>10s} {'文件大小':>12s}", file=self.stdout, flush=True)
+            print(f"  {'-'*38}", file=self.stdout, flush=True)
+            import sqlite3 as _sqlite
+            for fname in files[-10:]:  # 最近 10 天
+                db_path = os.path.join(DATA_DIR, fname)
+                fsize = os.path.getsize(db_path)
+                conn = _sqlite.connect(db_path)
+                cnt = conn.execute("SELECT COUNT(*) FROM ctp_tick").fetchone()[0]
+                conn.close()
+                total_ticks += cnt
+                total_size += fsize
+                print(f"  {fname.replace('.db',''):<12s} {cnt:>10,d} {fsize:>11,d}B" if cnt > 0 else f"  {fname.replace('.db',''):<12s} (空)", file=self.stdout, flush=True)
+            print(f"  {'─'*38}", file=self.stdout, flush=True)
+            print(f"  总计: {total_ticks:,d} ticks, {total_size/1024/1024:.1f}MB", file=self.stdout, flush=True)
+
     def do_log(self, _):
         """查看最近日志 (最后10行)"""
         try:
