@@ -17,6 +17,8 @@ class FuturesQuote(BaseModel):
     low: Optional[float] = Field(None, description="最低价")
     open: Optional[float] = Field(None, description="开盘价")
     prev_close: Optional[float] = Field(None, description="昨收价")
+    bid1: Optional[float] = Field(None, description="买一价")
+    ask1: Optional[float] = Field(None, description="卖一价")
     market: str = Field("domestic", description="domestic/international")
 
 
