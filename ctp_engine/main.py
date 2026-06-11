@@ -440,11 +440,11 @@ class CtpConsole(cmd.Cmd):
         import sqlite3 as _sqlite
         parts = arg.strip().split()
         if not parts:
-            print("用法: look <合约代码> [日期] [-n 条数]", file=self.stdout, flush=True)
+            print("用法: look <合约代码> [日期] [-n 条数]，不传-n默认显示最新100条", file=self.stdout, flush=True)
             return
         code = parts[0]
         day = date.today().strftime("%Y%m%d")
-        limit = 50
+        limit = 100
         i = 1
         while i < len(parts):
             if parts[i].startswith("-n") and i + 1 < len(parts):
@@ -460,52 +460,24 @@ class CtpConsole(cmd.Cmd):
             return
 
         conn = _sqlite.connect(db_path)
-        total = conn.execute(
-            "SELECT COUNT(*) FROM ctp_tick WHERE code=?", (code,)
-        ).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM ctp_tick WHERE code=?", (code,)).fetchone()[0]
         if total == 0:
             print(f"{code} 在 {day} 无数据", file=self.stdout, flush=True)
             conn.close(); return
 
-        offset = 0
-        page_size = min(limit, 20)  # 每页 20 条
-        total_pages = (total + page_size - 1) // page_size
-
-        while offset < total:
-            rows = conn.execute(
-                "SELECT trade_time,price,volume,open_interest,bid1,ask1 FROM ctp_tick WHERE code=? ORDER BY trade_time LIMIT ? OFFSET ?",
-                (code, page_size, offset)
-            ).fetchall()
-            if not rows: break
-
-            print(f"\n{'='*80}", file=self.stdout, flush=True)
-            print(f"  {code} | {day} | 第 {offset//page_size + 1}/{total_pages} 页 | 共 {total} 条", file=self.stdout, flush=True)
-            print(f"  {'时间':<22s} {'价格':>10s} {'成交量':>12s} {'持仓':>10s} {'买一':>10s} {'卖一':>10s}", file=self.stdout, flush=True)
-            print(f"  {'-'*76}", file=self.stdout, flush=True)
-            for r in rows:
-                print(f"  {r[0]:<22s} {r[1]:>10.2f} {int(r[2] or 0):>12,d} {int(r[3] or 0):>10,d} {r[4] or '':>10s} {r[5] or '':>10s}",
-                      file=self.stdout, flush=True)
-
-            offset += page_size
-            if offset >= total: break
-
-            print(f"\n  [Enter 下一页 | b 上一页 | q 退出 | 第{offset//page_size+1}/{total_pages}页]",
-                  file=self.stdout, flush=True)
-            try:
-                line = self.stdin.readline()
-                if not line:
-                    break
-                cmd = line.strip().lower()
-                if cmd == 'q':
-                    print("已退出", file=self.stdout, flush=True)
-                    conn.close(); return
-                elif cmd == 'b':
-                    offset = max(0, offset - page_size * 2)
-            except Exception:
-                break
-
+        rows = conn.execute(
+            "SELECT trade_time,price,volume,open_interest,bid1,ask1 FROM ctp_tick WHERE code=? ORDER BY trade_time DESC LIMIT ?",
+            (code, min(limit, 200))
+        ).fetchall()
         conn.close()
-        print(f"\n -- 完 --", file=self.stdout, flush=True)
+
+        print(f"\n  {code} | {day} | 共 {total} 条，显示最新 {len(rows)} 条", file=self.stdout, flush=True)
+        print(f"  {'时间':<22s} {'价格':>10s} {'成交量':>12s} {'持仓':>10s} {'买一':>10s} {'卖一':>10s}", file=self.stdout, flush=True)
+        print(f"  {'-'*76}", file=self.stdout, flush=True)
+        for r in reversed(rows):
+            print(f"  {r[0]:<22s} {r[1]:>10.2f} {int(r[2] or 0):>12,d} {int(r[3] or 0):>10,d} {r[4] or '':>10s} {r[5] or '':>10s}",
+                  file=self.stdout, flush=True)
+        print(f"  -- 完 --", file=self.stdout, flush=True)
 
     def do_size(self, arg):
         """查看数据大小: size [合约代码]"""
