@@ -406,6 +406,80 @@ class CtpConsole(cmd.Cmd):
             print(f"  PUSH_URL: {PUSH_URL or '未配置'}", file=self.stdout, flush=True)
             print(f"  间隔: {PUSH_INTERVAL}s | 累计推送: {state.push_count}", file=self.stdout, flush=True)
 
+    def do_look(self, arg):
+        """查看合约历史数据: look fu2609 [20260611] [-n 100]"""
+        import sqlite3 as _sqlite
+        parts = arg.strip().split()
+        if not parts:
+            print("用法: look <合约代码> [日期] [-n 条数]", file=self.stdout, flush=True)
+            return
+        code = parts[0]
+        day = date.today().strftime("%Y%m%d")
+        limit = 50
+        i = 1
+        while i < len(parts):
+            if parts[i].startswith("-n") and i + 1 < len(parts):
+                limit = int(parts[i+1]); i += 2
+            elif len(parts[i]) == 8 and parts[i].isdigit():
+                day = parts[i]; i += 1
+            else:
+                i += 1
+
+        db_path = os.path.join(DATA_DIR, f"{day}.db")
+        if not os.path.exists(db_path):
+            print(f"数据文件不存在: {day}.db", file=self.stdout, flush=True)
+            return
+
+        conn = _sqlite.connect(db_path)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM ctp_tick WHERE code=?", (code,)
+        ).fetchone()[0]
+        if total == 0:
+            print(f"{code} 在 {day} 无数据", file=self.stdout, flush=True)
+            conn.close(); return
+
+        offset = 0
+        page_size = min(limit, 20)  # 每页 20 条
+        total_pages = (total + page_size - 1) // page_size
+
+        while offset < total:
+            rows = conn.execute(
+                "SELECT trade_time,price,volume,open_interest,bid1,ask1 FROM ctp_tick WHERE code=? ORDER BY trade_time LIMIT ? OFFSET ?",
+                (code, page_size, offset)
+            ).fetchall()
+            if not rows: break
+
+            print(f"\n{'='*80}", file=self.stdout, flush=True)
+            print(f"  {code} | {day} | 第 {offset//page_size + 1}/{total_pages} 页 | 共 {total} 条", file=self.stdout, flush=True)
+            print(f"  {'时间':<22s} {'价格':>10s} {'成交量':>12s} {'持仓':>10s} {'买一':>10s} {'卖一':>10s}", file=self.stdout, flush=True)
+            print(f"  {'-'*76}", file=self.stdout, flush=True)
+            for r in rows:
+                print(f"  {r[0]:<22s} {r[1]:>10.2f} {int(r[2] or 0):>12,d} {int(r[3] or 0):>10,d} {r[4] or '':>10s} {r[5] or '':>10s}",
+                      file=self.stdout, flush=True)
+
+            offset += page_size
+            if offset >= total: break
+
+            print(f"\n  [Enter/n 下一页 | b 上一页 | q 退出 | 第{offset//page_size+1}/{total_pages}页]",
+                  file=self.stdout, flush=True)
+            try:
+                # 逐字符读取，支持回车/空格=下一页，b=上一页，q=退出
+                while True:
+                    ch = self.stdin.read(1)
+                    if ch in ('\n', '\r', ' ', 'n', 'j'):
+                        break
+                    elif ch == 'b':
+                        offset = max(0, offset - page_size * 2)
+                        break
+                    elif ch == 'q':
+                        print("\n已退出", file=self.stdout, flush=True)
+                        conn.close(); return
+            except Exception:
+                break
+
+        conn.close()
+        print(f"\n -- 完 --", file=self.stdout, flush=True)
+
     def do_log(self, _):
         """查看最近日志 (最后10行)"""
         try:
