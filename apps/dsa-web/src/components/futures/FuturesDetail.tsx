@@ -32,7 +32,7 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
       if (items.length > 0) {
         const last = items[items.length - 1];
         lastPriceRef.current = last.close;
-        setSpot(s => ({ ...s, price: last.close }));
+        setSpot(prev => ({ ...prev, price: last.close }));
       }
       setLoading(false);
     }).catch(() => setLoading(false));
