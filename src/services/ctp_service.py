@@ -66,6 +66,8 @@ def start_ctp():
                         "price": d.LastPrice,
                         "bid1": d.BidPrice1 if 0 < d.BidPrice1 < 1e100 else None,
                         "ask1": d.AskPrice1 if 0 < d.AskPrice1 < 1e100 else None,
+                        "bid_vol1": d.BidVolume1,
+                        "ask_vol1": d.AskVolume1,
                         "volume": d.Volume, "open_interest": d.OpenInterest,
                         "high": d.HighestPrice if d.HighestPrice > 0 else None,
                         "low": d.LowestPrice if d.LowestPrice > 0 else None,
