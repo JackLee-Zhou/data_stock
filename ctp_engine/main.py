@@ -347,14 +347,19 @@ def push_worker():
         executor.submit(do_push, batch)  # 异步提交，不阻塞循环
 
 
-# ── Console 交互 ────────────────────────────────────
+# ── Telnet Console (TCP 远程访问) ───────────────────
+CONSOLE_PORT = int(os.getenv("CTP_CONSOLE_PORT", "9999"))
+
+
 class CtpConsole(cmd.Cmd):
+    """可通过 telnet/nc 远程连接的 Console"""
     intro = "\nCTP 行情引擎 v2.0\n输入 help 查看命令\n"
     prompt = "ctp> "
 
-    def __init__(self, spi: MdSpi):
-        super().__init__()
+    def __init__(self, spi: MdSpi, stdin=None, stdout=None):
+        super().__init__(stdin=stdin or sys.stdin, stdout=stdout or sys.stdout)
         self.spi = spi
+        self.use_rawinput = False
 
     def do_status(self, _):
         """查看引擎状态"""
@@ -465,9 +470,41 @@ def main():
     # 启动每日合约刷新
     threading.Thread(target=daily_refresh_worker, args=(spi,), daemon=True, name="daily").start()
 
-    logger.info("引擎就绪，进入 Console...")
+    logger.info("引擎就绪，守护进程模式")
+    logger.info("远程 Console: telnet localhost %d  (或 nc localhost %d)", CONSOLE_PORT, CONSOLE_PORT)
+
+    # Telnet Console Server（后台线程监听 TCP，支持多次连接断开）
+    def handle_client(conn, addr):
+        logger.info("Console 连接: %s", addr)
+        try:
+            # 包装 socket 为文件对象供 cmd.Cmd 使用
+            rfile = conn.makefile('r', encoding='utf-8')
+            wfile = conn.makefile('w', encoding='utf-8')
+            CtpConsole(spi, stdin=rfile, stdout=wfile).cmdloop()
+            rfile.close(); wfile.close()
+        except Exception as exc:
+            logger.debug("Console 断开 %s: %s", addr, exc)
+        finally:
+            conn.close()
+            logger.info("Console 断开: %s", addr)
+
+    def console_server():
+        import socket as _socket
+        srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        srv.bind(('0.0.0.0', CONSOLE_PORT))
+        srv.listen(5)
+        logger.info("Console 端口 %d 已监听", CONSOLE_PORT)
+        while True:
+            conn, addr = srv.accept()
+            threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+
+    threading.Thread(target=console_server, daemon=True, name="console").start()
+
     try:
-        CtpConsole(spi).cmdloop()
+        while True:
+            time.sleep(60)
+            logger.debug("心跳: ticks=%d queue=%d", state.tick_count, tick_queue.qsize())
     except KeyboardInterrupt:
         print("\n收到中断信号")
     finally:
