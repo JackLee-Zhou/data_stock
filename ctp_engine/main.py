@@ -25,7 +25,9 @@ import sqlite3
 import sys
 import threading
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+
+TZ = timezone(timedelta(hours=8))  # 北京时间 UTC+8
 from logging.handlers import RotatingFileHandler
 from queue import Queue
 from typing import Dict, List, Optional
@@ -231,7 +233,7 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
         if not pData or pData.LastPrice <= 0: return
         tick = {
             "code": pData.InstrumentID,
-            "time": datetime.now().isoformat(),
+            "time": datetime.now(TZ).isoformat(),
             "price": pData.LastPrice,
             "volume": pData.Volume, "open_interest": pData.OpenInterest,
             "bid1": pData.BidPrice1 if 0 < pData.BidPrice1 < 1e100 else None,
