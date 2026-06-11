@@ -280,6 +280,35 @@ def storage_worker():
             last_flush = time.time()
 
 
+# ── 每日合约刷新 ────────────────────────────────────
+def daily_refresh_worker(spi: MdSpi):
+    """每天凌晨 0 点检查新合约并自动订阅/取消"""
+    last_date = date.today()
+    while True:
+        time.sleep(60)
+        today = date.today()
+        if today == last_date:
+            continue
+        last_date = today
+        logger.info("=== 每日合约刷新 (%s) ===", today)
+        try:
+            new_codes = load_all_futures()
+            added = [c for c in new_codes if c not in state.codes]
+            removed = [c for c in state.codes if c not in new_codes]
+            if added:
+                spi.subscribe_codes(added)
+                state.codes.extend(added)
+                logger.info("新增 %d 个合约: %s", len(added), added[:10])
+            if removed:
+                spi.unsubscribe_codes(removed)
+                for c in removed: state.codes.remove(c)
+                logger.info("移除 %d 个过期合约: %s", len(removed), removed[:10])
+            if not added and not removed:
+                logger.info("合约无变化 (%d 个)", len(state.codes))
+        except Exception as exc:
+            logger.error("每日合约刷新失败: %s", exc)
+
+
 # ── 推送线程 ────────────────────────────────────────
 def push_worker():
     """定时向本地服务器推送增量 tick"""
@@ -408,6 +437,7 @@ def main():
 
     # Step 3: 启动 MD API 订阅全部期货
     spi = MdSpi()
+    spi = MdSpi()
     flow = os.path.join(ENGINE_DIR, "flow_md")
     os.makedirs(flow, exist_ok=True)
     api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(os.path.join(flow, "md_flow"))
@@ -419,6 +449,9 @@ def main():
     if not spi.logged_in.wait(timeout=30):
         logger.error("登录超时")
         return 1
+
+    # 启动每日合约刷新
+    threading.Thread(target=daily_refresh_worker, args=(spi,), daemon=True, name="daily").start()
 
     logger.info("引擎就绪，进入 Console...")
     try:
