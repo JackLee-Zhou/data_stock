@@ -70,22 +70,24 @@ def get_futures_kline(code: str, days: int = Query(120, ge=1, le=365)):
         _rate_limit()
         import akshare as ak
         rows = []
-        # 试多个代码: CU0 → CU → cu2507
+        # CU0 → CU（去掉末尾数字0）
         base = "".join(c for c in str(code) if c.isalpha())
-        symbols = [code, base.upper(), base.lower()]
-        for sym in symbols:
+        for sym in [base.upper(), base.lower()]:
             try:
                 df = ak.futures_zh_daily_sina(symbol=sym)
                 if df is not None and not df.empty and len(df) > 0:
                     for _, r in df.iterrows():
-                        ds = str(r.get("日期", ""))
+                        ds = str(r.get("date", r.get("日期", "")))
                         try: td = datetime.strptime(ds[:10], "%Y-%m-%d").date()
                         except Exception: td = date.today()
                         rows.append({
                             "trade_date": td,
-                            "open": float(r.get("开盘价", 0) or 0), "high": float(r.get("最高价", 0) or 0),
-                            "low": float(r.get("最低价", 0) or 0), "close": float(r.get("收盘价", 0) or 0),
-                            "volume": float(r.get("成交量", 0) or 0), "open_interest": float(r.get("持仓量", 0) or 0),
+                            "open": float(r.get("open", r.get("开盘价", 0)) or 0),
+                            "high": float(r.get("high", r.get("最高价", 0)) or 0),
+                            "low": float(r.get("low", r.get("最低价", 0)) or 0),
+                            "close": float(r.get("close", r.get("收盘价", 0)) or 0),
+                            "volume": float(r.get("volume", r.get("成交量", 0)) or 0),
+                            "open_interest": float(r.get("hold", r.get("持仓量", 0)) or 0),
                         })
                     if rows: from_cache = False; break
             except Exception: continue
