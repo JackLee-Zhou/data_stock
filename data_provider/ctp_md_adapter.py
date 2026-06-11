@@ -1,29 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-CTP 行情适配器
+CTP 行情适配器 — 基于官方 openctp-ctp 示例
 
-连接 SimNow 行情服务器，订阅自选合约，每 500ms 接收深度行情推送。
-数据写入内存缓存（前端实时展示）+ CtpTick 表（持久化）。
-
-基于 openctp-ctp (CTPAPI Python binding)
+参考: integrations/ctp.examples/openctp-ctp/SubscribeMarketData.py
 """
 
 from __future__ import annotations
-
-import logging
-import threading
-import time as _time
+import logging, os, threading, time as _time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from openctp_ctp import mdapi
 from data_provider.ctp_types import CtpQuote, CtpStatus, CtpTickData
 
 logger = logging.getLogger(__name__)
 
 
-class CtpMdAdapter:
-    """CTP 行情接口适配器（单例）"""
-
+class CtpMdAdapter(mdapi.CThostFtdcMdSpi):
+    """CTP 行情适配器（继承 CThostFtdcMdSpi）"""
     _instance: Optional["CtpMdAdapter"] = None
     _lock = threading.Lock()
 
@@ -32,191 +26,137 @@ class CtpMdAdapter:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+                    cls._instance._init = False
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
-            return
-        self._api = None
+        if self._init: return
+        mdapi.CThostFtdcMdSpi.__init__(self)
+        self._api: Any = None
         self._status = CtpStatus()
         self._quotes: Dict[str, CtpQuote] = {}
-        self._tick_buffer: List[CtpTickData] = []
+        self._tick_buffer: List[dict] = []
         self._buffer_lock = threading.Lock()
-        self._request_id = 0
-        self._connected = False
-        self._initialized = True
-        self._flusher_thread: Optional[threading.Thread] = None
-        self._stop_flusher = False
+        self._connected = False; self._logged_in = False
+        self._stop = False; self._flusher: Optional[threading.Thread] = None
+        self._login_event = threading.Event()
+        self._init = True
 
     @property
-    def status(self) -> CtpStatus:
-        return self._status
+    def status(self) -> CtpStatus: return self._status
 
-    def connect(self, front_addr: str, broker_id: str, user_id: str, password: str) -> bool:
-        """连接行情服务器并登录。"""
+    def connect(self, front: str, broker: str, user: str, pwd: str) -> bool:
         try:
-            from openctp_ctp import mdapi
+            self._status.front_address = front
+            self._broker, self._user, self._pwd = broker, user, pwd
 
-            # 继承 CThostFtdcMdSpi 以接收回调
-            class _MdSpiImpl(mdapi.CThostFtdcMdSpi):
-                def __init__(_self, adapter):
-                    mdapi.CThostFtdcMdSpi.__init__(_self)
-                    _self._adapter = adapter
-                def OnFrontConnected(_self): _self._adapter.OnFrontConnected()
-                def OnFrontDisconnected(_self, r): _self._adapter.OnFrontDisconnected(r)
-                def OnRspUserLogin(_self, d, e, r, l): _self._adapter.OnRspUserLogin(d, e, r, l)
-                def OnRtnDepthMarketData(_self, d): _self._adapter.OnRtnDepthMarketData(d)
-
-            self._spi = _MdSpiImpl(self)
-            self._api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi()
-            self._status.front_address = front_addr
-            self._broker_id = broker_id
-            self._user_id = user_id
-            self._password = password
-
-            self._api.RegisterFront(front_addr)
-            self._api.RegisterSpi(self._spi)
+            flow = f'/tmp/ctp_md_flow_{user}'
+            os.makedirs(flow, exist_ok=True)
+            self._api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(os.path.join(flow, user))
+            self._api.RegisterFront(front)
+            self._api.RegisterSpi(self)
             self._api.Init()
+            logger.info("[CTP-MD] 连接中... %s", front)
 
-            # 等待连接建立（异步）
-            for _ in range(10):
-                _time.sleep(0.5)
-                if self._connected:
-                    break
-
-            if not self._connected:
-                logger.error("[CTP-MD] 连接超时")
-                self._status.last_error = "连接超时"
+            # 等待登录完成（OnFrontConnected → ReqUserLogin → OnRspUserLogin）
+            if not self._login_event.wait(timeout=10):
+                logger.error("[CTP-MD] 登录超时")
                 return False
 
-            # 启动 tick 刷盘线程
+            self._status.connected = True; self._status.logged_in = True
             self._start_flusher()
-            logger.info("[CTP-MD] 连接成功: %s", front_addr)
+            logger.info("[CTP-MD] 已连接, TradingDay=%s", self._status.trading_day)
             return True
-        except Exception as exc:
-            logger.error("[CTP-MD] 连接失败: %s", exc)
-            self._status.last_error = str(exc)
+        except Exception as e:
+            logger.error("[CTP-MD] 连接失败: %s", e)
+            self._status.last_error = str(e)
             return False
 
     def subscribe(self, codes: List[str]) -> int:
-        """订阅合约行情。返回成功订阅数。"""
-        if not self._api or not self._connected:
-            return 0
-        count = 0
-        for code in codes[:10]:  # 限制订阅数量
-            try:
-                c_bytes = code.encode('utf-8') if isinstance(code, str) else code
-                ret = self._api.SubscribeMarketData([c_bytes], 1)
-                if ret == 0:
-                    count += 1
-            except Exception as e:
-                logger.debug("[CTP-MD] 订阅 %s 失败: %s", code, e)
-        self._status.subscribed_count = count
-        logger.info("[CTP-MD] 订阅合约: %d/%d", count, len(codes))
-        return count
-        self._status.subscribed_count = subscribed
-        logger.info("[CTP-MD] 订阅合约: %d/%d", subscribed, len(codes))
-        return subscribed
+        if not self._api or not self._connected: return 0
+        encoded = [c.encode('utf-8') for c in codes]
+        ret = self._api.SubscribeMarketData(encoded, len(encoded))
+        self._status.subscribed_count = len(codes)
+        logger.info("[CTP-MD] 订阅 %d 合约, ret=%d", len(codes), ret)
+        return len(codes) if ret == 0 else 0
 
-    def get_quotes(self) -> Dict[str, CtpQuote]:
-        """获取当前所有行情快照（供前端轮询）。"""
-        return dict(self._quotes)
+    def get_quotes(self) -> dict:
+        return {k: {
+            "code": q.code, "price": q.price, "change_pct": q.change_pct,
+            "bid1": q.bid1, "ask1": q.ask1, "volume": q.volume,
+            "open_interest": q.open_interest,
+            "high": q.high, "low": q.low, "open": q.open, "prev_close": q.prev_close,
+            "updated_at": q.updated_at.isoformat() if q.updated_at else "",
+        } for k, q in self._quotes.items()}
 
-    def get_quote(self, code: str) -> Optional[CtpQuote]:
-        return self._quotes.get(code.upper())
+    def get_quote(self, code: str) -> Optional[dict]:
+        q = self._quotes.get(code.upper())
+        return {"code": q.code, "price": q.price, "bid1": q.bid1, "ask1": q.ask1} if q else None
 
-    # ── CTP 回调（由 CTP 线程调用）──
+    # ── CTP SPI Callbacks ──
 
     def OnFrontConnected(self):
-        logger.info("[CTP-MD] 行情前置连接成功")
-        self._status.connected = True
-        self._connected = True
-        # 连接成功后自动登录
-        from openctp_ctp import mdapi
+        """连接成功 → 登录"""
         req = mdapi.CThostFtdcReqUserLoginField()
-        req.BrokerID = getattr(self, '_broker_id', '9999')
-        req.UserID = getattr(self, '_user_id', '')
-        req.Password = getattr(self, '_password', '')
-        self._request_id += 1
-        self._api.ReqUserLogin(req, self._request_id)
+        req.BrokerID = self._broker; req.UserID = self._user; req.Password = self._pwd
+        req.UserProductInfo = '@openctp'
+        self._api.ReqUserLogin(req, 0)
 
     def OnFrontDisconnected(self, reason: int):
-        logger.warning("[CTP-MD] 行情前置断开: reason=%d", reason)
-        self._status.connected = False
+        self._connected = False; self._status.connected = False
+        logger.warning("[CTP-MD] 断开: reason=%d", reason)
 
-    def OnRspUserLogin(self, pRsp, pErr, nRequestID, bIsLast):
-        if pErr is not None and pErr.ErrorID != 0:
-            logger.error("[CTP-MD] 登录失败: %s", pErr.ErrorMsg)
-            self._status.last_error = pErr.ErrorMsg
-        else:
-            logger.info("[CTP-MD] 登录成功: %s", pRsp.TradingDay if pRsp else "?")
-            self._status.logged_in = True
-            if pRsp:
-                self._status.trading_day = pRsp.TradingDay
-
-    def OnRtnDepthMarketData(self, pData):
-        """行情推送回调（每 500ms）"""
-        if not pData:
+    def OnRspUserLogin(self, d, e, r, l):
+        if e and e.ErrorID != 0:
+            logger.error("[CTP-MD] 登录失败: %s", e.ErrorMsg)
+            self._status.last_error = e.ErrorMsg
             return
-        code = pData.InstrumentID
-        now = datetime.now()
-        quote = CtpQuote(
-            code=code,
-            price=pData.LastPrice,
-            bid1=pData.BidPrice1 if pData.BidPrice1 > 0 else None,
-            ask1=pData.AskPrice1 if pData.AskPrice1 > 0 else None,
-            volume=pData.Volume,
-            open_interest=pData.OpenInterest,
-            high=pData.HighestPrice if pData.HighestPrice > 0 else None,
-            low=pData.LowestPrice if pData.LowestPrice > 0 else None,
-            open=pData.OpenPrice if pData.OpenPrice > 0 else None,
-            prev_close=pData.PreSettlementPrice if pData.PreSettlementPrice > 0 else None,
-            updated_at=now,
-        )
-        self._quotes[code] = quote
+        self._trading_day = d.TradingDay if d else ""
+        self._status.trading_day = self._trading_day
+        self._status.logged_in = True
+        self._connected = True
+        logger.info("[CTP-MD] 登录成功: Day=%s Front=%s Session=%s",
+                     d.TradingDay, d.FrontID, d.SessionID)
+        self._login_event.set()
 
-        # 写入 tick 缓冲（异步刷盘）
+    def OnRtnDepthMarketData(self, d):
+        if not d: return
+        code = d.InstrumentID; now = datetime.now()
+        q = CtpQuote(code=code, price=d.LastPrice,
+                     bid1=d.BidPrice1 if d.BidPrice1 > 0 else None,
+                     ask1=d.AskPrice1 if d.AskPrice1 > 0 else None,
+                     volume=d.Volume, open_interest=d.OpenInterest,
+                     high=d.HighestPrice if d.HighestPrice > 0 else None,
+                     low=d.LowestPrice if d.LowestPrice > 0 else None,
+                     open=d.OpenPrice if d.OpenPrice > 0 else None,
+                     prev_close=d.PreSettlementPrice if d.PreSettlementPrice > 0 else None,
+                     updated_at=now)
+        self._quotes[code] = q
         with self._buffer_lock:
-            self._tick_buffer.append(CtpTickData(
-                code=code, trade_time=now,
-                price=pData.LastPrice,
-                bid1=quote.bid1, ask1=quote.ask1,
-                volume=pData.Volume, open_interest=pData.OpenInterest,
-            ))
+            self._tick_buffer.append({"code": code, "trade_time": now, "price": d.LastPrice,
+                                       "bid1": q.bid1, "ask1": q.ask1,
+                                       "volume": d.Volume, "open_interest": d.OpenInterest})
+
+    # ── Tick 刷盘 ──
 
     def _start_flusher(self):
-        """启动后台刷盘线程（每 2 秒批量写入 DB）"""
-        def _flush_loop():
-            while not self._stop_flusher:
+        def _loop():
+            while not self._stop:
                 _time.sleep(2)
                 with self._buffer_lock:
-                    if not self._tick_buffer:
-                        continue
-                    batch = self._tick_buffer
-                    self._tick_buffer = []
+                    if not self._tick_buffer: continue
+                    batch = self._tick_buffer; self._tick_buffer = []
                 try:
-                    from src.storage import DatabaseManager
-                    db = DatabaseManager()
+                    from src.storage import DatabaseManager, CtpTick
                     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-                    from src.storage import CtpTick as CtpTickModel
+                    db = DatabaseManager()
                     with db.session_scope() as s:
                         for t in batch:
-                            s.execute(sqlite_insert(CtpTickModel).values(
-                                code=t.code, trade_time=t.trade_time,
-                                price=t.price, bid1=t.bid1, ask1=t.ask1,
-                                volume=t.volume, open_interest=t.open_interest,
-                            ).on_conflict_do_nothing())
-                except Exception:
-                    pass
-
-        self._stop_flusher = False
-        self._flusher_thread = threading.Thread(target=_flush_loop, daemon=True)
-        self._flusher_thread.start()
+                            s.execute(sqlite_insert(CtpTick).values(**t).on_conflict_do_nothing())
+                except Exception: pass
+        self._stop = False
+        self._flusher = threading.Thread(target=_loop, daemon=True); self._flusher.start()
 
     def close(self):
-        self._stop_flusher = True
-        if self._api:
-            self._api.Release()
-        self._connected = False
-        self._status.connected = False
+        self._stop = True
+        if self._api: self._api.Release()
