@@ -151,7 +151,8 @@ class EngineState:
         with self.lock:
             self.tick_count += 1
         with self._push_lock:
-            self._pending_push.append(tick)
+            if len(self._pending_push) < MAX_PENDING_PUSH:
+                self._pending_push.append(tick)
 
     def pop_pending(self) -> List[dict]:
         with self._push_lock:
@@ -204,7 +205,14 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
 
     def OnFrontDisconnected(self, reason: int):
         state.connected = False
-        logger.warning("MD 断开: reason=%d", reason)
+        logger.warning("MD 断开: reason=%d, 10s 后自动重连...", reason)
+        # 异步重连（避免在 CTP 回调中阻塞）
+        def _reconnect():
+            time.sleep(10)
+            self.api.RegisterFront(MD_FRONT)
+            self.api.Init()
+            logger.info("MD 重连已发起")
+        threading.Thread(target=_reconnect, daemon=True).start()
 
     def OnRspUserLogin(self, pRsp, pErr, nReq, bLast):
         if pErr and pErr.ErrorID != 0:
@@ -255,10 +263,11 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
 
 # ── 落库线程 ────────────────────────────────────────
 def storage_worker():
-    """批量写入当天 SQLite"""
+    """批量写入当天 SQLite + 定期清理旧数据（保留 30 天）"""
     logger.info("落库线程启动")
     batch: List[dict] = []
     last_flush = time.time()
+    last_cleanup = date.today()
 
     while True:
         try:
@@ -286,6 +295,20 @@ def storage_worker():
                 logger.error("落库失败: %s", exc)
             batch.clear()
             last_flush = time.time()
+
+            # 每天检查一次，清理 30 天前的数据
+            today = date.today()
+            if today > last_cleanup:
+                last_cleanup = today
+                cutoff = today - timedelta(days=DATA_RETENTION_DAYS)
+                for fname in os.listdir(DATA_DIR):
+                    if not fname.endswith('.db'): continue
+                    try:
+                        fdate = datetime.strptime(fname.replace('.db', ''), "%Y%m%d").date()
+                        if fdate < cutoff:
+                            os.remove(os.path.join(DATA_DIR, fname))
+                            logger.info("清理旧日库: %s", fname)
+                    except ValueError: pass
 
 
 # ── 每日合约刷新 ────────────────────────────────────
@@ -351,6 +374,10 @@ def push_worker():
 
 # ── Telnet Console (TCP 远程访问) ───────────────────
 CONSOLE_PORT = int(os.getenv("CTP_CONSOLE_PORT", "9999"))
+CONSOLE_BIND = os.getenv("CTP_CONSOLE_BIND", "127.0.0.1")  # 默认仅本地，远端部署设为 0.0.0.0 时需配合防火墙
+MAX_CONSOLE_CONNS = 5  # 最大并发 Console 连接数
+MAX_PENDING_PUSH = 50000  # 推送队列最大积压（约 30 分钟数据）
+DATA_RETENTION_DAYS = 120  # 默认保留 120 天
 
 
 class CtpConsole(cmd.Cmd):
@@ -523,6 +550,23 @@ class CtpConsole(cmd.Cmd):
             print(f"  {'─'*38}", file=self.stdout, flush=True)
             print(f"  总计: {total_ticks:,d} ticks, {total_size/1024/1024:.1f}MB", file=self.stdout, flush=True)
 
+    def do_expire(self, arg):
+        """查看/设置数据过期时间: expire [天数，默认120]"""
+        global DATA_RETENTION_DAYS
+        arg = arg.strip()
+        if arg:
+            try:
+                days = int(arg)
+                if days < 7:
+                    print("最少保留 7 天", file=self.stdout, flush=True)
+                    return
+                DATA_RETENTION_DAYS = days
+                print(f"数据保留时间已设为 {days} 天（旧数据将在下次清理时删除）", file=self.stdout, flush=True)
+            except ValueError:
+                print("请输入有效天数，如: expire 60", file=self.stdout, flush=True)
+        else:
+            print(f"当前数据保留: {DATA_RETENTION_DAYS} 天", file=self.stdout, flush=True)
+
     def do_log(self, _):
         """查看最近日志 (最后10行)"""
         try:
@@ -574,7 +618,6 @@ def main():
 
     # Step 3: 启动 MD API 订阅全部期货
     spi = MdSpi()
-    spi = MdSpi()
     flow = os.path.join(ENGINE_DIR, "flow_md")
     os.makedirs(flow, exist_ok=True)
     api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(os.path.join(flow, "md_flow"))
@@ -612,12 +655,29 @@ def main():
         import socket as _socket
         srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-        srv.bind(('0.0.0.0', CONSOLE_PORT))
-        srv.listen(5)
-        logger.info("Console 端口 %d 已监听", CONSOLE_PORT)
+        srv.bind((CONSOLE_BIND, CONSOLE_PORT))
+        srv.listen(MAX_CONSOLE_CONNS)
+        logger.info("Console %s:%d 已监听 (max %d 连接)", CONSOLE_BIND, CONSOLE_PORT, MAX_CONSOLE_CONNS)
+
+        active_conns = 0
+        conn_lock = threading.Lock()
+
         while True:
             conn, addr = srv.accept()
-            threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+            with conn_lock:
+                if active_conns >= MAX_CONSOLE_CONNS:
+                    conn.close()
+                    logger.warning("Console 连接数已满，拒绝 %s", addr)
+                    continue
+                active_conns += 1
+            def _handle():
+                nonlocal active_conns
+                try:
+                    handle_client(conn, addr)
+                finally:
+                    with conn_lock:
+                        active_conns -= 1
+            threading.Thread(target=_handle, daemon=True).start()
 
     threading.Thread(target=console_server, daemon=True, name="console").start()
 
