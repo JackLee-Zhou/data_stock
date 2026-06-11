@@ -32,7 +32,7 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
   useEffect(() => {
     if (!chartRef.current || kline.length === 0) return;
     const c = createChart(chartRef.current, {
-      height: 450,
+      height: 550,
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#9ca3af' },
       grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
       rightPriceScale: { borderColor: '#374151' },
@@ -49,19 +49,43 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
   }, [kline]);
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
+    <div className="glass-panel-lg p-5 space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div><span className="font-semibold text-foreground">{quote.contractName}</span><span className="text-xs text-secondary-text ml-2">{quote.contractCode}</span></div>
-        <button onClick={onClose} className="text-secondary-text hover:text-foreground"><X className="h-4 w-4" /></button>
+        <div>
+          <span className="text-lg font-semibold text-foreground">{quote.contractName}</span>
+          <span className="text-sm text-secondary-text ml-2">{quote.contractCode}</span>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1.5 text-secondary-text hover:bg-surface-hover hover:text-foreground transition-colors">
+          <X className="h-5 w-5" />
+        </button>
       </div>
-      <div className="grid grid-cols-4 gap-2 text-center">
-        {[['最新价', spot.price > 0 ? spot.price.toFixed(2) : '-'], ['涨跌幅', spot.price > 0 ? `${spot.changePct >= 0 ? '+' : ''}${spot.changePct.toFixed(2)}%` : '-'], ['成交量', spot.vol > 0 ? spot.vol.toLocaleString() : '-'], ['持仓量', spot.oi > 0 ? spot.oi.toLocaleString() : '-']].map(([l, v]) => (
-          <div key={l} className="rounded-lg bg-surface-hover p-2"><div className="text-[10px] text-tertiary-text">{l}</div><div className={`text-sm font-semibold ${l === '涨跌幅' ? (spot.changePct >= 0 ? 'text-emerald-500' : 'text-red-500') : ''}`}>{v}</div></div>
+
+      {/* Price cards */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          ['最新价', spot.price > 0 ? spot.price.toFixed(2) : '-'],
+          ['涨跌幅', spot.price > 0 ? `${spot.changePct >= 0 ? '+' : ''}${spot.changePct.toFixed(2)}%` : '-'],
+          ['成交量', quote.volume > 0 ? quote.volume.toLocaleString() : '-'],
+          ['持仓量', quote.openInterest > 0 ? quote.openInterest.toLocaleString() : '-'],
+        ].map(([l, v]) => (
+          <div key={l} className="rounded-xl bg-surface-hover p-3 text-center">
+            <div className="text-[11px] text-tertiary-text mb-1">{l}</div>
+            <div className={`text-base font-bold tabular-nums ${l === '涨跌幅' ? (spot.changePct >= 0 ? 'text-emerald-500' : 'text-red-500') : 'text-foreground'}`}>{v}</div>
+          </div>
         ))}
       </div>
-      {loading ? <Loading label="K线加载中…" /> : kline.length === 0 ? (
-        <div className="flex items-center justify-center h-[400px] rounded-lg bg-surface-hover text-sm text-secondary-text">该合约暂无K线数据</div>
-      ) : <div ref={chartRef} />}
+
+      {/* K-line chart - larger */}
+      {loading ? (
+        <Loading label="K线加载中…" />
+      ) : kline.length === 0 ? (
+        <div className="flex items-center justify-center h-[500px] rounded-xl bg-surface-hover text-sm text-secondary-text">
+          该合约暂无K线数据
+        </div>
+      ) : (
+        <div ref={chartRef} className="w-full" />
+      )}
     </div>
   );
 };
