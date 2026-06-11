@@ -41,25 +41,72 @@ sys.path.insert(0, PROJECT_ROOT)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
 
-from openctp_ctp import mdapi
+from openctp_ctp import mdapi, tdapi
 
 # ── 配置 ────────────────────────────────────────────
 MD_FRONT = os.getenv("CTP_MD_FRONT", "tcp://182.254.243.31:30012")
+TD_FRONT = os.getenv("CTP_TRADE_FRONT", "tcp://182.254.243.31:30002")
 BROKER_ID = os.getenv("CTP_BROKER_ID", "9999")
 USER_ID = os.getenv("CTP_USER_ID", "266139")
 PASSWORD = os.getenv("CTP_PASSWORD", "")
 PUSH_URL = os.getenv("CTP_PUSH_URL", "")  # 本地 Web 服务器地址
 PUSH_INTERVAL = int(os.getenv("CTP_PUSH_INTERVAL", "10"))  # 推送间隔秒
 
-# ── 订阅合约 ────────────────────────────────────────
-DEFAULT_CODES = [
-    "ag2608","au2608","cu2507","al2507","zn2507","sn2607","ni2507",
-    "rb2610","hc2610","bu2609","ru2509","sp2609","ao2609",
-    "sc2607","lu2608",
-    "i2509","j2509","jm2509","m2509","y2509","p2509","l2509","pp2509",
-    "TA509","MA509","FG509","SA509","SR509","CF509","RM509",
-    "IF2507","IC2507","IM2507","si2508","lc2508",
-]
+
+# ── 动态查询全市场期货合约 ──────────────────────────
+def load_all_futures() -> List[str]:
+    """
+    通过 TD ReqQryInstrument 查询所有交易所的期货合约 (ProductClass='1')。
+    连接 TD → 登录 → 查询6个交易所 → 收集期货 → 返回列表。
+    """
+    all_codes = []
+    done = threading.Event()
+
+    class TdSpi(tdapi.CThostFtdcTraderSpi):
+        def __init__(s):
+            tdapi.CThostFtdcTraderSpi.__init__(s)
+        def OnFrontConnected(s):
+            auth = tdapi.CThostFtdcReqAuthenticateField()
+            auth.BrokerID = BROKER_ID; auth.UserID = USER_ID
+            auth.AppID = 'simnow_client_test'; auth.AuthCode = '0000000000000000'
+            auth.UserProductInfo = '@openctp'
+            s.api.ReqAuthenticate(auth, 0)
+        def OnRspAuthenticate(s, d, e, r, l):
+            req = tdapi.CThostFtdcReqUserLoginField()
+            req.BrokerID = BROKER_ID; req.UserID = USER_ID; req.Password = PASSWORD
+            req.UserProductInfo = '@openctp'
+            s.api.ReqUserLogin(req, 0, 0, "")
+        def OnRspUserLogin(s, d, e, r, l):
+            logger.info("[TD] 登录成功: Day=%s, 查询全市场合约...", d.TradingDay if d else "?")
+            for ex in ['SHFE', 'DCE', 'CZCE', 'CFFEX', 'INE', 'GFEX']:
+                q = tdapi.CThostFtdcQryInstrumentField(); q.ExchangeID = ex
+                s.api.ReqQryInstrument(q, 0)
+        def OnRspQryInstrument(s, d, e, r, l):
+            if d and d.InstrumentID and d.ProductClass == '1':
+                all_codes.append(d.InstrumentID)
+            if l:
+                logger.info("[TD] 查询完成: 共 %d 个期货合约", len(all_codes))
+                done.set()
+
+    flow = os.path.join(ENGINE_DIR, "flow_td")
+    os.makedirs(flow, exist_ok=True)
+    spi = TdSpi()
+    api = tdapi.CThostFtdcTraderApi.CreateFtdcTraderApi(os.path.join(flow, "td_query"))
+    spi.api = api
+    api.RegisterFront(TD_FRONT)
+    api.RegisterSpi(spi)
+    api.Init()
+
+    if not done.wait(timeout=30):
+        logger.error("[TD] 查询合约超时，使用空列表")
+        return []
+
+    api.Release()
+    logger.info("动态获取 %d 个期货合约", len(all_codes))
+    return sorted(all_codes)
+
+# ── 订阅合约（启动时从 TD API 动态查询，不写死）─────
+DEFAULT_CODES: List[str] = []  # 启动后由 _load_instruments() 填充
 
 # ── 目录初始化 ──────────────────────────────────────
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -336,9 +383,22 @@ class CtpConsole(cmd.Cmd):
 def main():
     print("=" * 60)
     print("CTP 行情引擎 v2.0")
-    print(f"MD: {MD_FRONT} | 账号: {USER_ID}")
+    print(f"TD: {TD_FRONT} | MD: {MD_FRONT}")
+    print(f"账号: {USER_ID}")
     print(f"数据目录: {DATA_DIR} | 日志: {LOG_DIR}")
-    ds = get_daily_db()  # 初始化当天 DB
+
+    # Step 1: 从 TD 动态查询全市场期货合约列表
+    global DEFAULT_CODES
+    print("查询全市场期货合约...")
+    DEFAULT_CODES = load_all_futures()
+    if not DEFAULT_CODES:
+        print("❌ 无法获取期货合约列表，退出")
+        return 1
+    print(f"✅ 获取 {len(DEFAULT_CODES)} 个期货合约")
+    state.codes = list(DEFAULT_CODES)
+
+    # Step 2: 初始化当天 DB
+    ds = get_daily_db()
     print(f"今日 DB: {os.path.basename(ds)}")
     print("=" * 60)
 
@@ -346,9 +406,9 @@ def main():
     threading.Thread(target=storage_worker, daemon=True, name="storage").start()
     threading.Thread(target=push_worker, daemon=True, name="push").start()
 
-    # 启动 MD API
+    # Step 3: 启动 MD API 订阅全部期货
     spi = MdSpi()
-    flow = os.path.join(ENGINE_DIR, "flow")
+    flow = os.path.join(ENGINE_DIR, "flow_md")
     os.makedirs(flow, exist_ok=True)
     api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(os.path.join(flow, "md_flow"))
     spi.api = api
