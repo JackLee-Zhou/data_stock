@@ -9,8 +9,11 @@ export const futuresApi = {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/futures/quotes', { params });
     return toCamelCase<FuturesListResponse>(response.data);
   },
-  async getKline(code: string, days = 120): Promise<FuturesKlineResponse> {
-    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/futures/quotes/${encodeURIComponent(code)}/kline`, { params: { days }, timeout: 30000 });
+  async getKline(code: string, days = 120, period = 'daily'): Promise<FuturesKlineResponse> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      `/api/v1/futures/quotes/${encodeURIComponent(code)}/kline`,
+      { params: { days, period }, timeout: 30000 },
+    );
     return toCamelCase<FuturesKlineResponse>(response.data);
   },
 };

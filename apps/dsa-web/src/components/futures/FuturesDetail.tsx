@@ -19,9 +19,9 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
 
   useEffect(() => {
     setLoading(true);
-    futuresApi.getKline(quote.contractCode, 120).then(data => {
+    futuresApi.getKline(quote.contractCode, 120, tf === '1d' ? 'daily' : tf).then(data => {
       const items = data.klines.map((k: any) => ({
-        time: (k.tradeDate || '').slice(0, 10),
+        time: (k.tradeDate || '').slice(0, tf === '1d' ? 10 : 19),  // 日K:date, 分时:datetime
         open: k.open, high: k.high, low: k.low, close: k.close,
       }));
       setKline(items);
