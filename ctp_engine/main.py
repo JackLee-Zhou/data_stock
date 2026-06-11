@@ -381,12 +381,15 @@ class CtpConsole(cmd.Cmd):
         """增加订阅: sub CU2507,RB2510"""
         codes = [c.strip() for c in arg.split(",") if c.strip()]
         new_codes = [c for c in codes if c not in state.codes]
+        already = [c for c in codes if c in state.codes]
         if new_codes:
             state.codes.extend(new_codes)
             self.spi.subscribe_codes(new_codes)
             print(f"已增加: {new_codes}", file=self.stdout, flush=True)
-        else:
-            print("无新增合约", file=self.stdout, flush=True)
+        if already:
+            print(f"已在列表: {already}", file=self.stdout, flush=True)
+        if not new_codes and not already:
+            print("无匹配合约", file=self.stdout, flush=True)
 
     def do_unsub(self, arg):
         """取消订阅: unsub AU2508"""
