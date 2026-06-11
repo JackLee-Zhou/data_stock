@@ -33,7 +33,7 @@ def _rate_limit():
 
 @router.get("/quotes", response_model=FuturesListResponse)
 def get_futures_quotes(market: Optional[str] = Query(None, description="domestic/international/all")):
-    """期货合约列表 + akshare最新行情"""
+    """期货合约列表 — akshare fallback 34个主力合约，点击查看K线"""
     manager = DataFetcherManager()
     try:
         items_raw = manager.get_futures_quotes() or []
@@ -68,24 +68,19 @@ def get_futures_kline(code: str, days: int = Query(120, ge=1, le=365)):
     from_cache = True
     if fetch_start:
         _rate_limit()
-        import akshare as ak, re
+        import akshare as ak
         rows = []
-        # 试多个代码格式: CU0 → cu2507, CU2507
-        base = "".join(c for c in str(code) if c.isalpha()).lower()
-        ym = today.strftime("%y%m")
-        symbols = [code]
-        if base:
-            symbols.extend([f"{base}{ym}", f"{base.upper()}{ym}", base])
+        # 试多个代码: CU0 → CU → cu2507
+        base = "".join(c for c in str(code) if c.isalpha())
+        symbols = [code, base.upper(), base.lower()]
         for sym in symbols:
             try:
                 df = ak.futures_zh_daily_sina(symbol=sym)
-                if df is not None and not df.empty:
+                if df is not None and not df.empty and len(df) > 0:
                     for _, r in df.iterrows():
                         ds = str(r.get("日期", ""))
-                        try:
-                            td = datetime.strptime(ds[:10], "%Y-%m-%d").date()
-                        except Exception:
-                            td = date.today()
+                        try: td = datetime.strptime(ds[:10], "%Y-%m-%d").date()
+                        except Exception: td = date.today()
                         rows.append({
                             "trade_date": td,
                             "open": float(r.get("开盘价", 0) or 0), "high": float(r.get("最高价", 0) or 0),
@@ -93,8 +88,7 @@ def get_futures_kline(code: str, days: int = Query(120, ge=1, le=365)):
                             "volume": float(r.get("成交量", 0) or 0), "open_interest": float(r.get("持仓量", 0) or 0),
                         })
                     if rows: from_cache = False; break
-            except Exception:
-                continue
+            except Exception: continue
         if rows:
             db.save_futures_daily(code, rows)
 
