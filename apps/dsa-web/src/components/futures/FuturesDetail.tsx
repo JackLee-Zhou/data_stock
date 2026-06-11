@@ -11,6 +11,7 @@ interface DepthLevel { bp: number | null; bv: number; ap: number | null; av: num
 
 export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void }> = ({ quote, onClose }) => {
   const chartRef = useRef<HTMLDivElement>(null);
+  const chartInst = useRef<any>(null);  // guard against double creation
   const [kline, setKline] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [tf, setTf] = useState<Timeframe>('1d');
@@ -68,7 +69,10 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
   // K线图渲染
   useEffect(() => {
     if (!chartRef.current || kline.length === 0) return;
-    const c = createChart(chartRef.current, {
+    // 销毁旧图表防止冲突
+    if (chartInst.current) { chartInst.current.remove(); chartInst.current = null; }
+    try {
+      const c = createChart(chartRef.current, {
       height: 480,
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#9ca3af' },
       grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
@@ -80,11 +84,12 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
       borderUpColor: '#10b981', borderDownColor: '#ef4444',
       wickUpColor: '#10b981', wickDownColor: '#ef4444',
     });
-    candle.setData(kline);
-    c.timeScale().fitContent();
+      candle.setData(kline);
+      c.timeScale().fitContent();
+      chartInst.current = c;
 
-    // 十字光标跟踪
-    c.subscribeCrosshairMove((param: any) => {
+      // 十字光标跟踪
+      c.subscribeCrosshairMove((param: any) => {
       try {
         if (param.time && param.seriesData?.size > 0) {
           const barData = param.seriesData.get(candle);
@@ -114,7 +119,11 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
       } catch {}
     });
 
-    return () => { c.remove(); };
+    } catch (e) { console.error('Chart error:', e); }
+
+    return () => {
+      if (chartInst.current) { chartInst.current.remove(); chartInst.current = null; }
+    };
   }, [kline]);
 
   const chgColor = spot.changePct >= 0 ? 'text-emerald-500' : spot.changePct < 0 ? 'text-red-500' : '';
