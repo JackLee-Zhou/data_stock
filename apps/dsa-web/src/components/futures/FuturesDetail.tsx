@@ -80,6 +80,9 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
   const askMaxVol = Math.max(...depth.map(d => d.av), 1);
   const fmtN = (v: number) => v > 0 ? (v > 10000 ? (v/10000).toFixed(1)+'万' : v.toLocaleString()) : '-';
 
+  // 过滤无效档位（价格为null的）
+  const activeDepth = depth.filter(d => d.bp !== null || d.ap !== null);
+
   return (
     <div className="glass-panel-lg p-5 space-y-3">
       {/* Header */}
@@ -130,28 +133,33 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
         {/* Right: 五档盘口 */}
         <div className="w-[240px] shrink-0 space-y-2">
           <div className="text-xs font-medium text-secondary-text mb-2">五档盘口</div>
-          {[...depth].reverse().map((d, i) => (
+          {/* Sells (reversed: 卖5→卖1) */}
+          {[...activeDepth].reverse().map((d, i) => (
             <div key={`a-${i}`} className="grid grid-cols-[1fr_60px_auto] gap-2 text-xs items-center">
-              <span className="text-right text-red-500 font-mono tabular-nums">{d.ap?.toFixed(2) || '-'}</span>
+              <span className="text-right text-red-500 font-mono tabular-nums">{d.ap?.toFixed(2) || ''}</span>
               <span className="text-right text-secondary-text tabular-nums">{d.av > 0 ? d.av.toLocaleString() : ''}</span>
               <div className="h-4 rounded-sm bg-red-500/15 relative overflow-hidden">
-                <div className="absolute right-0 top-0 h-full bg-red-500/20" style={{ width: `${(d.av / askMaxVol * 100)}%` }} />
+                <div className="absolute right-0 top-0 h-full bg-red-500/20" style={{ width: `${d.av / askMaxVol * 100}%` }} />
               </div>
             </div>
           ))}
+          {/* Spread */}
           <div className="py-1.5 text-center border-y border-border">
             <span className="text-sm font-bold font-mono tabular-nums text-foreground">{spot.price > 0 ? spot.price.toFixed(2) : '-'}</span>
-            <span className="text-[10px] text-tertiary-text ml-2">
-              价差 {depth[0]?.bp && depth[0]?.ap ? (depth[0].ap - depth[0].bp).toFixed(2) : '-'}
-            </span>
+            {activeDepth[0]?.bp && activeDepth[0]?.ap && (
+              <span className="text-[10px] text-tertiary-text ml-2">
+                价差 {(activeDepth[0].ap! - activeDepth[0].bp!).toFixed(2)}
+              </span>
+            )}
           </div>
-          {depth.map((d, i) => (
+          {/* Buys (买1→买5) */}
+          {activeDepth.map((d, i) => (
             <div key={`b-${i}`} className="grid grid-cols-[auto_60px_1fr] gap-2 text-xs items-center">
               <div className="h-4 rounded-sm bg-emerald-500/15 relative overflow-hidden">
-                <div className="absolute right-0 top-0 h-full bg-emerald-500/20" style={{ width: `${(d.bv / bidMaxVol * 100)}%` }} />
+                <div className="absolute right-0 top-0 h-full bg-emerald-500/20" style={{ width: `${d.bv / bidMaxVol * 100}%` }} />
               </div>
               <span className="text-left text-secondary-text tabular-nums">{d.bv > 0 ? d.bv.toLocaleString() : ''}</span>
-              <span className="text-left text-emerald-500 font-mono tabular-nums">{d.bp?.toFixed(2) || '-'}</span>
+              <span className="text-left text-emerald-500 font-mono tabular-nums">{d.bp?.toFixed(2) || ''}</span>
             </div>
           ))}
         </div>
