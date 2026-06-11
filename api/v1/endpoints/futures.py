@@ -69,31 +69,56 @@ def get_futures_quotes(market: Optional[str] = Query(None, description="domestic
 @router.get("/quotes/{code:path}/kline", response_model=FuturesKlineResponse)
 def get_futures_kline(code: str, days: int = Query(120, ge=1, le=365),
                        period: str = Query("daily", description="daily|1m|5m|15m")):
-    """K线 — daily用futures_zh_daily_sina，分时用futures_zh_minute_sina"""
-    import akshare as ak, os as _os, certifi
-    if not _os.environ.get("SSL_CERT_FILE"): _os.environ["SSL_CERT_FILE"] = certifi.where()
+    """
+    K线 — daily用akshare历史数据，分时用CTP tick聚合。
+    CTP tick 存在 ctp_tick 表，每2秒写入。首次加载需等 tick 积累。
+    """
+    from src.storage import DatabaseManager
+    db = DatabaseManager()
 
     items = []
-    sym = code if any(c.isdigit() for c in code) else code
-    try:
-        if period == "daily":
-            df = ak.futures_zh_daily_sina(symbol=sym)
+    if period == "daily":
+        # 日K：akshare历史数据
+        import akshare as ak, os as _os, certifi
+        if not _os.environ.get("SSL_CERT_FILE"): _os.environ["SSL_CERT_FILE"] = certifi.where()
+        try:
+            df = ak.futures_zh_daily_sina(symbol=code)
             if df is not None and not df.empty:
                 for _, r in df.tail(days).iterrows():
                     items.append(KlineItem(trade_date=str(r.get("date", "")),
                         open=float(r.get("open", 0) or 0), high=float(r.get("high", 0) or 0),
                         low=float(r.get("low", 0) or 0), close=float(r.get("close", 0) or 0),
                         volume=float(r.get("volume", 0) or 0), open_interest=float(r.get("hold", 0) or 0)))
-        else:
-            limit = {"1m": 240, "5m": 200, "15m": 100}.get(period, 240)
-            df = ak.futures_zh_minute_sina(symbol=sym)
-            if df is not None and not df.empty:
-                for _, r in df.tail(limit).iterrows():
-                    items.append(KlineItem(trade_date=str(r.get("datetime", "")),
-                        open=float(r.get("open", 0) or 0), high=float(r.get("high", 0) or 0),
-                        low=float(r.get("low", 0) or 0), close=float(r.get("close", 0) or 0),
-                        volume=float(r.get("volume", 0) or 0), open_interest=float(r.get("hold", 0) or 0)))
-    except Exception as exc:
-        logger.warning("K线失败 %s: %s", code, exc)
+        except Exception as exc:
+            logger.warning("日K失败 %s: %s", code, exc)
+    else:
+        # 分时K线：从 CTP tick 聚合
+        from sqlalchemy import text, func
+        minutes = {"1m": 1, "5m": 5, "15m": 15}.get(period, 1)
+        limit = {"1m": 240, "5m": 200, "15m": 100}.get(period, 240)
+        try:
+            with db.session_scope() as s:
+                rows = s.execute(text(f"""
+                    SELECT
+                        strftime('%Y-%m-%d %H:%M:00', trade_time, '-{minutes} minutes') as bucket,
+                        MIN(price) as low, MAX(price) as high,
+                        FIRST_VALUE(price) OVER win as open,
+                        LAST_VALUE(price) OVER win as close,
+                        SUM(volume) as total_volume,
+                        MAX(open_interest) as oi
+                    FROM ctp_tick
+                    WHERE code = :code AND trade_time >= datetime('now', '-1 day')
+                    GROUP BY bucket
+                    WINDOW win AS (PARTITION BY bucket ORDER BY trade_time ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+                    ORDER BY bucket DESC
+                    LIMIT :limit
+                """), {"code": code, "limit": limit}).fetchall()
+                for r in reversed(rows):
+                    items.append(KlineItem(trade_date=r[0],
+                        open=float(r[3] or r[4] or 0), high=float(r[2] or 0),
+                        low=float(r[1] or 0), close=float(r[4] or 0),
+                        volume=float(r[5] or 0), open_interest=float(r[6] or 0)))
+        except Exception as exc:
+            logger.warning("CTP tick聚合失败 %s: %s", code, exc)
 
-    return FuturesKlineResponse(code=code, klines=items, from_cache=bool(items))
+    return FuturesKlineResponse(code=code, klines=items, from_cache=False)

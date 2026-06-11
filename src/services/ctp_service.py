@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """CTP 服务 — TD 连接 → 查期货列表 → 轮询行情"""
 import logging, os, threading, time as _time
+from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,21 @@ def start_ctp():
                         p = price if (price and 0 < price < 1e100) else None
                         v = volume if (volume and volume > 0) else 0
                         return p, v
+                    # 存 tick 到 DB（异步，不阻塞）
+                    try:
+                        from src.storage import DatabaseManager, CtpTick as CtpTickModel
+                        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                        db = DatabaseManager()
+                        with db.session_scope() as sess:
+                            sess.execute(sqlite_insert(CtpTickModel).values(
+                                code=d.InstrumentID, trade_time=datetime.now(),
+                                price=d.LastPrice,
+                                bid1=d.BidPrice1 if 0 < d.BidPrice1 < 1e100 else None,
+                                ask1=d.AskPrice1 if 0 < d.AskPrice1 < 1e100 else None,
+                                volume=d.Volume, open_interest=d.OpenInterest,
+                            ).on_conflict_do_nothing())
+                    except Exception: pass
+
                     _quotes_cache[d.InstrumentID] = {
                         "code": d.InstrumentID,
                         "name": s._futures.get(d.InstrumentID, d.InstrumentID),
