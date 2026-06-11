@@ -84,22 +84,24 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
     c.timeScale().fitContent();
 
     // 十字光标跟踪：鼠标移到K线上时更新顶部价格
-    c.subscribeCrosshairMove((param: any) => {
-      if (param.time && param.seriesData?.size > 0) {
-        const barData = param.seriesData.get(candle);
-        const fullBar = kline.find((k: any) => k.time === param.time);
-        if (barData && barData.close && fullBar) {
-          const prevIdx = kline.findIndex((k: any) => k.time === param.time) - 1;
-          const prev = prevIdx >= 0 ? kline[prevIdx] : barData;
-          setSpot({
-            price: barData.close,
-            changePct: prev.close ? ((barData.close - prev.close) / prev.close * 100) : 0,
-            vol: Number(fullBar.volume || 0), oi: Number(fullBar.open_interest || 0),
-            high: Number(barData.high || 0), low: Number(barData.low || 0),
-            open: Number(barData.open || 0), prevClose: Number(prev.close || 0),
-          });
-        }
-      } else {
+    try {
+      c.subscribeCrosshairMove((param: any) => {
+        try {
+          if (param.time && param.seriesData?.size > 0) {
+            const barData = param.seriesData.get(candle);
+            const fullBar = kline.find((k: any) => k.time === param.time);
+            if (barData && barData.close && fullBar) {
+              const prevIdx = kline.findIndex((k: any) => k.time === param.time) - 1;
+              const prev = prevIdx >= 0 ? kline[prevIdx] : barData;
+              setSpot({
+                price: barData.close,
+                changePct: prev.close ? ((barData.close - prev.close) / prev.close * 100) : 0,
+                vol: Number(fullBar.volume || 0), oi: Number(fullBar.open_interest || 0),
+                high: Number(barData.high || 0), low: Number(barData.low || 0),
+                open: Number(barData.open || 0), prevClose: Number(prev.close || 0),
+              });
+            }
+          } else {
         // 鼠标移出K线区域 → 恢复最新价
         const last = kline[kline.length - 1];
         if (last) {
@@ -112,7 +114,7 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
             open: Number(last.open || 0), prevClose: Number(prev.close || 0),
           });
         }
-      }
+      } catch {}
     });
 
     return () => { c.remove(); };
