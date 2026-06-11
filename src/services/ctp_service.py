@@ -60,19 +60,42 @@ def start_ctp():
         def OnRspQryDepthMarketData(s, d, e, r, l):
             if d and d.InstrumentID and d.LastPrice > 0 and d.InstrumentID in s._futures:
                 with _cache_lock:
+                    # 五档盘口
+                    def _safe_bid_ask(price, volume):
+                        p = price if (price and 0 < price < 1e100) else None
+                        v = volume if (volume and volume > 0) else 0
+                        return p, v
                     _quotes_cache[d.InstrumentID] = {
                         "code": d.InstrumentID,
                         "name": s._futures.get(d.InstrumentID, d.InstrumentID),
                         "price": d.LastPrice,
-                        "bid1": d.BidPrice1 if 0 < d.BidPrice1 < 1e100 else None,
-                        "ask1": d.AskPrice1 if 0 < d.AskPrice1 < 1e100 else None,
-                        "bid_vol1": d.BidVolume1,
-                        "ask_vol1": d.AskVolume1,
                         "volume": d.Volume, "open_interest": d.OpenInterest,
                         "high": d.HighestPrice if d.HighestPrice > 0 else None,
                         "low": d.LowestPrice if d.LowestPrice > 0 else None,
                         "open": d.OpenPrice if d.OpenPrice > 0 else None,
                         "prev_close": d.PreSettlementPrice if d.PreSettlementPrice > 0 else None,
+                        "depth": [
+                            {"bp": _safe_bid_ask(d.BidPrice1, d.BidVolume1)[0],
+                             "bv": _safe_bid_ask(d.BidPrice1, d.BidVolume1)[1],
+                             "ap": _safe_bid_ask(d.AskPrice1, d.AskVolume1)[0],
+                             "av": _safe_bid_ask(d.AskPrice1, d.AskVolume1)[1]},
+                            {"bp": _safe_bid_ask(d.BidPrice2, d.BidVolume2)[0],
+                             "bv": _safe_bid_ask(d.BidPrice2, d.BidVolume2)[1],
+                             "ap": _safe_bid_ask(d.AskPrice2, d.AskVolume2)[0],
+                             "av": _safe_bid_ask(d.AskPrice2, d.AskVolume2)[1]},
+                            {"bp": _safe_bid_ask(d.BidPrice3, d.BidVolume3)[0],
+                             "bv": _safe_bid_ask(d.BidPrice3, d.BidVolume3)[1],
+                             "ap": _safe_bid_ask(d.AskPrice3, d.AskVolume3)[0],
+                             "av": _safe_bid_ask(d.AskPrice3, d.AskVolume3)[1]},
+                            {"bp": _safe_bid_ask(d.BidPrice4, d.BidVolume4)[0],
+                             "bv": _safe_bid_ask(d.BidPrice4, d.BidVolume4)[1],
+                             "ap": _safe_bid_ask(d.AskPrice4, d.AskVolume4)[0],
+                             "av": _safe_bid_ask(d.AskPrice4, d.AskVolume4)[1]},
+                            {"bp": _safe_bid_ask(d.BidPrice5, d.BidVolume5)[0],
+                             "bv": _safe_bid_ask(d.BidPrice5, d.BidVolume5)[1],
+                             "ap": _safe_bid_ask(d.AskPrice5, d.AskVolume5)[0],
+                             "av": _safe_bid_ask(d.AskPrice5, d.AskVolume5)[1]},
+                        ],
                     }
 
     flow = f'/tmp/ctp_g2_{user}'; os.makedirs(flow, exist_ok=True)

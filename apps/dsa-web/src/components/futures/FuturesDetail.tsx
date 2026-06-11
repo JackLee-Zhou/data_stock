@@ -5,13 +5,18 @@ import type { FuturesQuote } from '../../types/futures';
 import { futuresApi } from '../../api/futures';
 import { Loading } from '../common';
 
+type Timeframe = '1m' | '5m' | '15m' | '1d';
+
+interface DepthLevel { bp: number | null; bv: number; ap: number | null; av: number; }
+
 export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void }> = ({ quote, onClose }) => {
   const chartRef = useRef<HTMLDivElement>(null);
   const [kline, setKline] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [spot, setSpot] = useState({ price: 0, changePct: 0, vol: 0, oi: 0, high: 0, low: 0, open: 0, bid1: 0, ask1: 0, bidVol1: 0, askVol1: 0 });
+  const [tf, setTf] = useState<Timeframe>('1d');
+  const [spot, setSpot] = useState({ price: 0, changePct: 0, vol: 0, oi: 0, high: 0, low: 0, open: 0, prevClose: 0 });
+  const [depth, setDepth] = useState<DepthLevel[]>([]);
 
-  // 拉K线
   useEffect(() => {
     setLoading(true);
     futuresApi.getKline(quote.contractCode, 120).then(data => {
@@ -28,7 +33,6 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
     }).catch(() => setLoading(false));
   }, [quote.contractCode]);
 
-  // 轮询 CTP 实时行情（每3秒）
   useEffect(() => {
     const poll = async () => {
       try {
@@ -36,33 +40,26 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
         const d = await r.json();
         const q = d.quotes?.[quote.contractCode];
         if (q && q.price > 0) {
-          const prev = spot.price || q.price;
-          setSpot({
+          setSpot(s => ({
             price: q.price,
-            changePct: prev ? ((q.price - prev) / prev * 100) : 0,
-            vol: q.volume || 0,
-            oi: q.open_interest || 0,
-            high: q.high || 0,
-            low: q.low || 0,
-            open: q.open || 0,
-            bid1: q.bid1 || 0,
-            ask1: q.ask1 || 0,
-            bidVol1: q.bid_vol1 || 0,
-            askVol1: q.ask_vol1 || 0,
-          });
+            changePct: s.price > 0 ? ((q.price - s.price) / s.price * 100) : 0,
+            vol: Number(q.volume || 0), oi: Number(q.open_interest || 0),
+            high: Number(q.high || 0), low: Number(q.low || 0),
+            open: Number(q.open || 0), prevClose: Number(q.prev_close || 0),
+          }));
+          if (q.depth?.length) setDepth(q.depth);
         }
       } catch {}
     };
     poll();
-    const timer = setInterval(poll, 3000);
-    return () => clearInterval(timer);
+    const t = setInterval(poll, 2000);
+    return () => clearInterval(t);
   }, [quote.contractCode]);
 
-  // K线图
   useEffect(() => {
     if (!chartRef.current || kline.length === 0) return;
     const c = createChart(chartRef.current, {
-      height: 550,
+      height: 480,
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#9ca3af' },
       grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
       rightPriceScale: { borderColor: '#374151' },
@@ -78,70 +75,87 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
     return () => { c.remove(); };
   }, [kline]);
 
-  const fmt = (v: number) => v > 0 ? v.toLocaleString() : '-';
+  const chgColor = spot.changePct >= 0 ? 'text-emerald-500' : spot.changePct < 0 ? 'text-red-500' : '';
+  const bidMaxVol = Math.max(...depth.map(d => d.bv), 1);
+  const askMaxVol = Math.max(...depth.map(d => d.av), 1);
+  const fmtN = (v: number) => v > 0 ? (v > 10000 ? (v/10000).toFixed(1)+'万' : v.toLocaleString()) : '-';
 
   return (
-    <div className="glass-panel-lg p-5 space-y-4">
+    <div className="glass-panel-lg p-5 space-y-3">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <span className="text-lg font-semibold text-foreground">{quote.contractName}</span>
-          <span className="text-sm text-secondary-text ml-2">{quote.contractCode}</span>
-          <span className="inline-flex items-center ml-3 px-2 py-0.5 rounded-full text-[11px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-            ● CTP 实时
-          </span>
+        <div className="flex items-center gap-3">
+          <span className="text-lg font-bold text-foreground">{quote.contractName}</span>
+          <span className="text-sm text-secondary-text">{quote.contractCode}</span>
+          {spot.price > 0 && (
+            <>
+              <span className={`text-xl font-mono font-bold tabular-nums ${chgColor}`}>{spot.price.toFixed(2)}</span>
+              <span className={`text-sm font-medium tabular-nums ${chgColor}`}>
+                {spot.changePct >= 0 ? '+' : ''}{Math.abs(spot.changePct).toFixed(2)}%
+              </span>
+            </>
+          )}
+          <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-500">CTP实时</span>
         </div>
-        <button onClick={onClose} className="rounded-lg p-1.5 text-secondary-text hover:bg-surface-hover hover:text-foreground transition-colors"><X className="h-5 w-5" /></button>
+        <div className="flex items-center gap-1">
+          {(['1m', '5m', '15m', '1d'] as Timeframe[]).map(t => (
+            <button key={t} onClick={() => setTf(t)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${tf === t ? 'bg-accent text-white' : 'bg-surface-hover text-secondary-text hover:text-foreground'}`}>
+              {t === '1d' ? '日K' : t === '1m' ? '1分' : t === '5m' ? '5分' : '15分'}
+            </button>
+          ))}
+          <button onClick={onClose} className="ml-2 rounded-lg p-1.5 text-secondary-text hover:bg-surface-hover hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
       </div>
 
-      {/* 实时行情卡片 - 买一卖一 + 盘口量 */}
-      <div className="grid grid-cols-5 gap-3">
-        {[
-          ['最新价', spot.price > 0 ? spot.price.toFixed(2) : '-', spot.changePct >= 0 ? 'text-emerald-500' : 'text-red-500'],
-          ['涨跌幅', spot.price > 0 ? `${spot.changePct >= 0 ? '+' : ''}${spot.changePct.toFixed(2)}%` : '-', spot.changePct >= 0 ? 'text-emerald-500' : 'text-red-500'],
-          ['今开', spot.open > 0 ? spot.open.toFixed(2) : '-', ''],
-          ['最高', spot.high > 0 ? spot.high.toFixed(2) : '-', 'text-emerald-500'],
-          ['最低', spot.low > 0 ? spot.low.toFixed(2) : '-', 'text-red-500'],
-        ].map(([l, v, cls]) => (
-          <div key={l} className="rounded-xl bg-surface-hover p-3 text-center">
-            <div className="text-[11px] text-tertiary-text mb-1">{l}</div>
-            <div className={`text-base font-bold tabular-nums ${cls}`}>{v}</div>
+      <div className="flex gap-4">
+        {/* Left: Chart */}
+        <div className="flex-1 min-w-0">
+          <div className="grid grid-cols-6 gap-2 mb-3">
+            {[
+              ['今开', spot.open], ['最高', spot.high], ['最低', spot.low],
+              ['昨收', spot.prevClose], ['成交量', spot.vol], ['持仓', spot.oi],
+            ].map(([l, v]) => (
+              <div key={l} className="rounded-lg bg-surface-hover px-2 py-1.5 text-center">
+                <div className="text-[10px] text-tertiary-text">{l}</div>
+                <div className="text-xs font-semibold tabular-nums text-foreground">{fmtN(Number(v))}</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+          {loading ? <Loading /> : kline.length === 0 ? (
+            <div className="flex items-center justify-center h-[400px] rounded-xl bg-surface-hover text-sm text-secondary-text">暂无K线数据</div>
+          ) : <div ref={chartRef} />}
+        </div>
 
-      {/* 买卖盘口 */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          ['买一价', spot.bid1 > 0 ? spot.bid1.toFixed(2) : '-', 'text-emerald-500'],
-          ['买一量', spot.bidVol1 > 0 ? fmt(spot.bidVol1) : '-', ''],
-          ['卖一价', spot.ask1 > 0 ? spot.ask1.toFixed(2) : '-', 'text-red-500'],
-          ['卖一量', spot.askVol1 > 0 ? fmt(spot.askVol1) : '-', ''],
-        ].map(([l, v, cls]) => (
-          <div key={l} className="rounded-xl bg-surface-hover p-3 text-center">
-            <div className="text-[11px] text-tertiary-text mb-1">{l}</div>
-            <div className={`text-sm font-bold tabular-nums ${cls}`}>{v}</div>
+        {/* Right: 五档盘口 */}
+        <div className="w-[240px] shrink-0 space-y-2">
+          <div className="text-xs font-medium text-secondary-text mb-2">五档盘口</div>
+          {[...depth].reverse().map((d, i) => (
+            <div key={`a-${i}`} className="grid grid-cols-[1fr_60px_auto] gap-2 text-xs items-center">
+              <span className="text-right text-red-500 font-mono tabular-nums">{d.ap?.toFixed(2) || '-'}</span>
+              <span className="text-right text-secondary-text tabular-nums">{d.av > 0 ? d.av.toLocaleString() : ''}</span>
+              <div className="h-4 rounded-sm bg-red-500/15 relative overflow-hidden">
+                <div className="absolute right-0 top-0 h-full bg-red-500/20" style={{ width: `${(d.av / askMaxVol * 100)}%` }} />
+              </div>
+            </div>
+          ))}
+          <div className="py-1.5 text-center border-y border-border">
+            <span className="text-sm font-bold font-mono tabular-nums text-foreground">{spot.price > 0 ? spot.price.toFixed(2) : '-'}</span>
+            <span className="text-[10px] text-tertiary-text ml-2">
+              价差 {depth[0]?.bp && depth[0]?.ap ? (depth[0].ap - depth[0].bp).toFixed(2) : '-'}
+            </span>
           </div>
-        ))}
+          {depth.map((d, i) => (
+            <div key={`b-${i}`} className="grid grid-cols-[auto_60px_1fr] gap-2 text-xs items-center">
+              <div className="h-4 rounded-sm bg-emerald-500/15 relative overflow-hidden">
+                <div className="absolute right-0 top-0 h-full bg-emerald-500/20" style={{ width: `${(d.bv / bidMaxVol * 100)}%` }} />
+              </div>
+              <span className="text-left text-secondary-text tabular-nums">{d.bv > 0 ? d.bv.toLocaleString() : ''}</span>
+              <span className="text-left text-emerald-500 font-mono tabular-nums">{d.bp?.toFixed(2) || '-'}</span>
+            </div>
+          ))}
+        </div>
       </div>
-
-      {/* 成交量+持仓 */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          ['成交量', fmt(spot.vol)],
-          ['持仓量', fmt(spot.oi)],
-          ['昨收', quote.prevClose ? quote.prevClose.toFixed(2) : '-'],
-        ].map(([l, v]) => (
-          <div key={l} className="rounded-xl bg-surface-hover p-3 text-center">
-            <div className="text-[11px] text-tertiary-text mb-1">{l}</div>
-            <div className="text-sm font-semibold tabular-nums text-foreground">{v}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* K线 */}
-      {loading ? <Loading label="K线加载中…" /> : kline.length === 0 ? (
-        <div className="flex items-center justify-center h-[500px] rounded-xl bg-surface-hover text-sm text-secondary-text">该合约暂无K线数据</div>
-      ) : <div ref={chartRef} className="w-full" />}
     </div>
   );
 };
