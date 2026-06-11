@@ -2067,32 +2067,41 @@ class AkshareFetcher(BaseFetcher):
             })
         return rows
 
+    # 国内期货主力合约 fallback 列表
+    _FALLBACK_FUTURES = [
+        ("CU0", "沪铜连续"), ("AL0", "沪铝连续"), ("ZN0", "沪锌连续"), ("PB0", "沪铅连续"),
+        ("NI0", "沪镍连续"), ("SN0", "沪锡连续"), ("AU0", "沪金连续"), ("AG0", "沪银连续"),
+        ("RB0", "螺纹钢连续"), ("HC0", "热卷连续"), ("SS0", "不锈钢连续"),
+        ("I0", "铁矿石连续"), ("J0", "焦炭连续"), ("JM0", "焦煤连续"), ("M0", "豆粕连续"),
+        ("Y0", "豆油连续"), ("P0", "棕榈油连续"), ("A0", "豆一连续"),
+        ("MA0", "甲醇连续"), ("TA0", "PTA连续"), ("FG0", "玻璃连续"), ("SA0", "纯碱连续"),
+        ("SR0", "白糖连续"), ("CF0", "棉花连续"), ("RM0", "菜粕连续"), ("OI0", "菜油连续"),
+        ("SC0", "原油连续"), ("FU0", "燃料油连续"), ("LU0", "低硫燃料油连续"),
+        ("IF0", "沪深300连续"), ("IC0", "中证500连续"), ("IM0", "中证1000连续"),
+        ("SI0", "工业硅连续"), ("LC0", "碳酸锂连续"),
+    ]
+
     def get_futures_quotes(self) -> Optional[List[Dict[str, Any]]]:
         """
-        获取国内商品期货主力合约列表（仅名称，不含行情）。
-
-        行情数据在用户点击合约 → K线详情时按需拉取 + 增量保存到 futures_daily 表。
-        这样列表页 1 次请求秒出，不会因批量行情拉取等待 80s。
+        获取国内商品期货主力合约列表。优先 akshare，fallback 硬编码。
         """
         import akshare as ak
-
         try:
-            self._set_random_user_agent()
-            self._enforce_rate_limit()
-            logger.info("[API调用] ak.futures_display_main_sina() 获取合约列表...")
+            self._set_random_user_agent(); self._enforce_rate_limit()
+            logger.info("[API调用] ak.futures_display_main_sina()")
             contracts = ak.futures_display_main_sina()
-            if contracts is None or contracts.empty:
-                return None
-            items = []
-            for _, row in contracts.iterrows():
-                s = str(row.get("symbol", "")).strip()
-                n = str(row.get("name", "")).strip()
-                if s and n:
-                    items.append({"contract_code": s, "contract_name": n, "market": "domestic"})
-            return items
+            if contracts is not None and not contracts.empty:
+                items = []
+                for _, row in contracts.iterrows():
+                    s = str(row.get("symbol", "")).strip()
+                    n = str(row.get("name", "")).strip()
+                    if s and n: items.append({"contract_code": s, "contract_name": n, "market": "domestic"})
+                if items: return items
         except Exception as e:
-            logger.warning("[Akshare] 期货合约列表获取失败: %s", e)
-            return None
+            logger.warning("[Akshare] futures_display_main_sina 失败: %s", e)
+
+        logger.info("[Akshare] 使用 fallback 合约列表 (%d)", len(self._FALLBACK_FUTURES))
+        return [{"contract_code": c, "contract_name": n, "market": "domestic"} for c, n in self._FALLBACK_FUTURES]
 
     @staticmethod
     def _normalize_futures_data(df) -> List[Dict[str, Any]]:

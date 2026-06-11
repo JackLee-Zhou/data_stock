@@ -68,34 +68,35 @@ def get_futures_kline(code: str, days: int = Query(120, ge=1, le=365)):
     from_cache = True
     if fetch_start:
         _rate_limit()
-        import akshare as ak
+        import akshare as ak, re
         rows = []
-        try:
-            df = ak.futures_zh_daily_sina(symbol=code)
-            if df is not None and not df.empty:
-                rows = []
-                for _, r in df.iterrows():
-                    dt_str = str(r.get("日期", ""))
-                    try:
-                        td = datetime.strptime(dt_str, "%Y-%m-%d").date() if len(dt_str) > 10 else datetime.strptime(dt_str, "%Y-%m-%d").date()
-                    except Exception:
-                        td = date.today()
-                    if len(dt_str) == 8:
-                        td = datetime.strptime(dt_str, "%Y%m%d").date()
-                    rows.append({
-                        "trade_date": td,
-                        "open": float(r.get("开盘价", r.get("open", 0)) or 0),
-                        "high": float(r.get("最高价", r.get("high", 0)) or 0),
-                        "low": float(r.get("最低价", r.get("low", 0)) or 0),
-                        "close": float(r.get("收盘价", r.get("close", 0)) or 0),
-                        "volume": float(r.get("成交量", r.get("volume", 0)) or 0),
-                        "open_interest": float(r.get("持仓量", r.get("open_interest", 0)) or 0),
-                    })
-                if rows:
-                    from_cache = False
-                    db.save_futures_daily(code, rows)
-        except Exception as exc:
-            logger.warning("期货K线 %s 拉取失败: %s", code, exc)
+        # 试多个代码格式: CU0 → cu2507, CU2507
+        base = "".join(c for c in str(code) if c.isalpha()).lower()
+        ym = today.strftime("%y%m")
+        symbols = [code]
+        if base:
+            symbols.extend([f"{base}{ym}", f"{base.upper()}{ym}", base])
+        for sym in symbols:
+            try:
+                df = ak.futures_zh_daily_sina(symbol=sym)
+                if df is not None and not df.empty:
+                    for _, r in df.iterrows():
+                        ds = str(r.get("日期", ""))
+                        try:
+                            td = datetime.strptime(ds[:10], "%Y-%m-%d").date()
+                        except Exception:
+                            td = date.today()
+                        rows.append({
+                            "trade_date": td,
+                            "open": float(r.get("开盘价", 0) or 0), "high": float(r.get("最高价", 0) or 0),
+                            "low": float(r.get("最低价", 0) or 0), "close": float(r.get("收盘价", 0) or 0),
+                            "volume": float(r.get("成交量", 0) or 0), "open_interest": float(r.get("持仓量", 0) or 0),
+                        })
+                    if rows: from_cache = False; break
+            except Exception:
+                continue
+        if rows:
+            db.save_futures_daily(code, rows)
 
     # 2. 返回 DB 数据
     klines = db.get_futures_daily(code, days)
