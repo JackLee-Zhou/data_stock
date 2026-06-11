@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""
+CTP 行情订阅独立引擎 (远端部署版)
+
+- MD API 推送模式订阅全市场期货行情
+- Queue 解耦回调与存储
+- 按天 SQLite 分库归档
+- Console 交互式命令行
+- 日志滚动
+- 定时向本地 Web 服务器推送增量数据
+
+启动: python ctp_engine/main.py
+退出: Ctrl+C (优雅关闭) 或 console 中输入 quit
+
+架构参考:
+  知乎《CTP程序化交易进阶系列》- Queue 解耦
+  博客园《CTP行情实时写入MySQL》- 数据落库模式
+"""
+
+import cmd
+import json
+import logging
+import os
+import sqlite3
+import sys
+import threading
+import time
+from datetime import datetime, date
+from logging.handlers import RotatingFileHandler
+from queue import Queue
+from typing import Dict, List, Optional
+
+# ── 路径配置 ─────────────────────────────────────────
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(ENGINE_DIR, "data")
+LOG_DIR = os.path.join(ENGINE_DIR, "logs")
+sys.path.insert(0, PROJECT_ROOT)
+
+# 加载 .env
+from dotenv import load_dotenv
+load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
+
+from openctp_ctp import mdapi
+
+# ── 配置 ────────────────────────────────────────────
+MD_FRONT = os.getenv("CTP_MD_FRONT", "tcp://182.254.243.31:30012")
+BROKER_ID = os.getenv("CTP_BROKER_ID", "9999")
+USER_ID = os.getenv("CTP_USER_ID", "266139")
+PASSWORD = os.getenv("CTP_PASSWORD", "")
+PUSH_URL = os.getenv("CTP_PUSH_URL", "")  # 本地 Web 服务器地址
+PUSH_INTERVAL = int(os.getenv("CTP_PUSH_INTERVAL", "10"))  # 推送间隔秒
+
+# ── 订阅合约 ────────────────────────────────────────
+DEFAULT_CODES = [
+    "ag2608","au2608","cu2507","al2507","zn2507","sn2607","ni2507",
+    "rb2610","hc2610","bu2609","ru2509","sp2609","ao2609",
+    "sc2607","lu2608",
+    "i2509","j2509","jm2509","m2509","y2509","p2509","l2509","pp2509",
+    "TA509","MA509","FG509","SA509","SR509","CF509","RM509",
+    "IF2507","IC2507","IM2507","si2508","lc2508",
+]
+
+# ── 目录初始化 ──────────────────────────────────────
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# ── 日志 ────────────────────────────────────────────
+logger = logging.getLogger("ctp_engine")
+logger.setLevel(logging.DEBUG)
+
+# 控制台
+console = logging.StreamHandler(sys.stdout)
+console.setLevel(logging.INFO)
+console.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S'))
+logger.addHandler(console)
+
+# 文件（10MB 滚动，保留 7 天）
+file_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, "ctp_engine.log"), maxBytes=10*1024*1024, backupCount=7, encoding='utf-8'
+)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+logger.addHandler(file_handler)
+
+
+# ── 全局状态 ────────────────────────────────────────
+class EngineState:
+    """引擎全局状态（线程安全）"""
+    def __init__(self):
+        self.codes: List[str] = list(DEFAULT_CODES)
+        self.tick_count = 0
+        self.push_count = 0
+        self.connected = False
+        self.logged_in = False
+        self.trading_day = ""
+        self.lock = threading.Lock()
+        self._pending_push: List[dict] = []
+        self._push_lock = threading.Lock()
+
+    def add_tick(self, tick: dict):
+        with self.lock:
+            self.tick_count += 1
+        with self._push_lock:
+            self._pending_push.append(tick)
+
+    def pop_pending(self) -> List[dict]:
+        with self._push_lock:
+            batch = self._pending_push
+            self._pending_push = []
+            return batch
+
+state = EngineState()
+tick_queue: Queue = Queue(maxsize=500000)
+
+
+# ── 按天 SQLite ─────────────────────────────────────
+def get_daily_db(d: Optional[date] = None) -> str:
+    """获取当天的 SQLite 数据库路径，自动创建表。"""
+    d = d or date.today()
+    db_path = os.path.join(DATA_DIR, f"{d.strftime('%Y%m%d')}.db")
+    if not os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        conn.execute("""CREATE TABLE IF NOT EXISTS ctp_tick (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            trade_time TEXT NOT NULL,
+            price REAL, volume REAL, open_interest REAL,
+            bid1 REAL, ask1 REAL,
+            high REAL, low REAL, open REAL, prev_close REAL
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_code_time ON ctp_tick(code, trade_time)")
+        conn.commit()
+        conn.close()
+        logger.info("新建日库: %s", os.path.basename(db_path))
+    return db_path
+
+
+# ── MD SPI ──────────────────────────────────────────
+class MdSpi(mdapi.CThostFtdcMdSpi):
+    def __init__(self):
+        mdapi.CThostFtdcMdSpi.__init__(self)
+        self.api: Optional[mdapi.CThostFtdcMdApi] = None
+        self.logged_in = threading.Event()
+
+    def OnFrontConnected(self):
+        state.connected = True
+        logger.info("MD 连接成功，登录中...")
+        req = mdapi.CThostFtdcReqUserLoginField()
+        req.BrokerID = BROKER_ID; req.UserID = USER_ID; req.Password = PASSWORD
+        req.UserProductInfo = '@openctp'
+        self.api.ReqUserLogin(req, 0)
+
+    def OnFrontDisconnected(self, reason: int):
+        state.connected = False
+        logger.warning("MD 断开: reason=%d", reason)
+
+    def OnRspUserLogin(self, pRsp, pErr, nReq, bLast):
+        if pErr and pErr.ErrorID != 0:
+            logger.error("登录失败: [%d] %s", pErr.ErrorID, pErr.ErrorMsg)
+            return
+        state.logged_in = True
+        state.trading_day = pRsp.TradingDay if pRsp else ""
+        logger.info("登录成功: Day=%s", state.trading_day)
+        self._subscribe()
+
+    def _subscribe(self):
+        codes = [c.encode() for c in state.codes]
+        ret = self.api.SubscribeMarketData(codes, len(codes))
+        logger.info("订阅 %d 个合约, ret=%d", len(codes), ret)
+        self.logged_in.set()
+
+    def subscribe_codes(self, new_codes: List[str]):
+        encoded = [c.encode() for c in new_codes]
+        self.api.SubscribeMarketData(encoded, len(encoded))
+
+    def unsubscribe_codes(self, codes: List[str]):
+        encoded = [c.encode() for c in codes]
+        self.api.UnSubscribeMarketData(encoded, len(encoded))
+
+    def OnRtnDepthMarketData(self, pData):
+        if not pData or pData.LastPrice <= 0: return
+        tick = {
+            "code": pData.InstrumentID,
+            "time": datetime.now().isoformat(),
+            "price": pData.LastPrice,
+            "volume": pData.Volume, "open_interest": pData.OpenInterest,
+            "bid1": pData.BidPrice1 if 0 < pData.BidPrice1 < 1e100 else None,
+            "ask1": pData.AskPrice1 if 0 < pData.AskPrice1 < 1e100 else None,
+            "high": pData.HighestPrice if pData.HighestPrice > 0 else None,
+            "low": pData.LowestPrice if pData.LowestPrice > 0 else None,
+            "open": pData.OpenPrice if pData.OpenPrice > 0 else None,
+            "prev_close": pData.PreSettlementPrice if pData.PreSettlementPrice > 0 else None,
+        }
+        try:
+            tick_queue.put_nowait(tick)
+        except Exception:
+            pass
+
+
+# ── 落库线程 ────────────────────────────────────────
+def storage_worker():
+    """批量写入当天 SQLite"""
+    logger.info("落库线程启动")
+    batch: List[dict] = []
+    last_flush = time.time()
+
+    while True:
+        try:
+            tick = tick_queue.get(timeout=2)
+            batch.append(tick)
+        except Exception:
+            pass
+
+        if batch and (len(batch) >= 500 or time.time() - last_flush > 2):
+            try:
+                db_path = get_daily_db()
+                conn = sqlite3.connect(db_path)
+                conn.execute("BEGIN")
+                for t in batch:
+                    conn.execute(
+                        "INSERT INTO ctp_tick(code,trade_time,price,volume,open_interest,bid1,ask1,high,low,open,prev_close) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (t["code"], t["time"], t["price"], t["volume"], t["open_interest"],
+                         t["bid1"], t["ask1"], t["high"], t["low"], t["open"], t["prev_close"])
+                    )
+                    state.add_tick(t)
+                conn.commit()
+                conn.close()
+                logger.debug("落库 %d ticks", len(batch))
+            except Exception as exc:
+                logger.error("落库失败: %s", exc)
+            batch.clear()
+            last_flush = time.time()
+
+
+# ── 推送线程 ────────────────────────────────────────
+def push_worker():
+    """定时向本地服务器推送增量 tick"""
+    if not PUSH_URL:
+        logger.info("未配置 PUSH_URL，跳过推送")
+        return
+    logger.info("推送线程启动: %s, 间隔 %ds", PUSH_URL, PUSH_INTERVAL)
+    import requests
+    while True:
+        time.sleep(PUSH_INTERVAL)
+        batch = state.pop_pending()
+        if not batch: continue
+        try:
+            resp = requests.post(
+                f"{PUSH_URL}/api/v1/ctp/sync",
+                json={"ticks": batch[-2000:]},  # 最多 2000 条
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                state.push_count += len(batch)
+            else:
+                logger.warning("推送失败: HTTP %d", resp.status_code)
+        except Exception as exc:
+            logger.warning("推送异常: %s", exc)
+
+
+# ── Console 交互 ────────────────────────────────────
+class CtpConsole(cmd.Cmd):
+    intro = "\nCTP 行情引擎 v2.0\n输入 help 查看命令\n"
+    prompt = "ctp> "
+
+    def __init__(self, spi: MdSpi):
+        super().__init__()
+        self.spi = spi
+
+    def do_status(self, _):
+        """查看引擎状态"""
+        with state.lock:
+            tc = state.tick_count
+        print(f"  连接: {'✅' if state.connected else '❌'} | 登录: {'✅' if state.logged_in else '❌'}")
+        print(f"  交易日: {state.trading_day}")
+        print(f"  Tick 总数: {tc} | 推送: {state.push_count}")
+        print(f"  Queue: {tick_queue.qsize()} | 订阅: {len(state.codes)}")
+
+    def do_contracts(self, _):
+        """列出所有订阅合约"""
+        for i, c in enumerate(state.codes):
+            print(f"  {i+1:3d}. {c}", end="")
+            if (i + 1) % 6 == 0: print()
+        print()
+
+    def do_sub(self, arg):
+        """增加订阅: sub CU2507,RB2510"""
+        codes = [c.strip() for c in arg.split(",") if c.strip()]
+        new_codes = [c for c in codes if c not in state.codes]
+        if new_codes:
+            state.codes.extend(new_codes)
+            self.spi.subscribe_codes(new_codes)
+            print(f"已增加: {new_codes}")
+        else:
+            print("无新增合约")
+
+    def do_unsub(self, arg):
+        """取消订阅: unsub AU2508"""
+        codes = [c.strip() for c in arg.split(",") if c.strip()]
+        for c in codes:
+            if c in state.codes:
+                state.codes.remove(c)
+        self.spi.unsubscribe_codes(codes)
+        print(f"已取消: {codes}")
+
+    def do_push(self, arg):
+        """推送状态: push status"""
+        if arg == "status":
+            print(f"  PUSH_URL: {PUSH_URL or '未配置'}")
+            print(f"  间隔: {PUSH_INTERVAL}s | 累计推送: {state.push_count}")
+
+    def do_log(self, _):
+        """查看最近日志 (最后10行)"""
+        try:
+            with open(os.path.join(LOG_DIR, "ctp_engine.log"), 'r') as f:
+                lines = f.readlines()
+                for l in lines[-10:]:
+                    print(l.rstrip())
+        except Exception as e:
+            print(f"读取日志失败: {e}")
+
+    def do_quit(self, _):
+        """退出引擎"""
+        print("正在关闭...")
+        return True
+
+    def do_EOF(self, _):
+        return True
+
+    def default(self, line):
+        print(f"未知命令: {line}，输入 help 查看帮助")
+
+
+# ── 主入口 ──────────────────────────────────────────
+def main():
+    print("=" * 60)
+    print("CTP 行情引擎 v2.0")
+    print(f"MD: {MD_FRONT} | 账号: {USER_ID}")
+    print(f"数据目录: {DATA_DIR} | 日志: {LOG_DIR}")
+    ds = get_daily_db()  # 初始化当天 DB
+    print(f"今日 DB: {os.path.basename(ds)}")
+    print("=" * 60)
+
+    # 启动后台线程
+    threading.Thread(target=storage_worker, daemon=True, name="storage").start()
+    threading.Thread(target=push_worker, daemon=True, name="push").start()
+
+    # 启动 MD API
+    spi = MdSpi()
+    flow = os.path.join(ENGINE_DIR, "flow")
+    os.makedirs(flow, exist_ok=True)
+    api = mdapi.CThostFtdcMdApi.CreateFtdcMdApi(os.path.join(flow, "md_flow"))
+    spi.api = api
+    api.RegisterFront(MD_FRONT)
+    api.RegisterSpi(spi)
+    api.Init()
+
+    if not spi.logged_in.wait(timeout=30):
+        logger.error("登录超时")
+        return 1
+
+    logger.info("引擎就绪，进入 Console...")
+    try:
+        CtpConsole(spi).cmdloop()
+    except KeyboardInterrupt:
+        print("\n收到中断信号")
+    finally:
+        api.Release()
+        logger.info("引擎已停止")
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
