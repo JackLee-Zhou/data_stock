@@ -46,11 +46,11 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
         const d = await r.json();
         const q = d.quotes?.[quote.contractCode];
         if (q && q.price > 0) {
-          const prev = lastPriceRef.current || q.price;
+          const oldPrice = lastPriceRef.current || q.price;
           lastPriceRef.current = q.price;
-          setSpot(s => ({
+          setSpot(() => ({
             price: q.price,
-            changePct: prev ? ((q.price - prev) / prev * 100) : 0,
+            changePct: oldPrice ? ((q.price - oldPrice) / oldPrice * 100) : 0,
             vol: Number(q.volume || 0), oi: Number(q.open_interest || 0),
             high: Number(q.high || 0), low: Number(q.low || 0),
             open: Number(q.open || 0), prevClose: Number(q.prev_close || 0),
