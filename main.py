@@ -258,11 +258,9 @@ def _start_ctp_if_configured():
     """启动 CTP 行情（如果已配置账号），失败不影响主流程。"""
     try:
         from src.services import ctp_service
-        status = ctp_service.start_ctp()
-        if status.connected:
-            logging.getLogger(__name__).info(
-                "[CTP] 行情已连接: day=%s subs=%d", status.trading_day, status.subscribed_count
-            )
+        result = ctp_service.start_ctp()
+        if result.get("ok"):
+            logging.getLogger(__name__).info("[CTP] 行情已连接: futures=%d", result.get("futures", 0))
     except Exception as exc:
         logging.getLogger(__name__).warning("[CTP] 自动启动失败: %s", exc)
 
