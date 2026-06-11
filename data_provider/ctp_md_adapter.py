@@ -126,6 +126,9 @@ class CtpMdAdapter(tdapi.CThostFtdcTraderSpi):
         self._query_quotes()
 
     def OnRspQryDepthMarketData(self, d, e, r, l):
+        if l:
+            logger.info("[CTP-TD] 行情查询完成: %d 条", len(self._quotes))
+            self._status.subscribed_count = len(self._quotes)
         if d and d.InstrumentID and d.LastPrice and d.LastPrice > 0:
             code = d.InstrumentID
             self._quotes[code] = CtpQuote(
@@ -147,7 +150,7 @@ class CtpMdAdapter(tdapi.CThostFtdcTraderSpi):
 
     def _query_quotes(self):
         if not self._api or not self._connected: return
-        logger.debug("[CTP-TD] 查询行情...")
+        logger.info("[CTP-TD] 查询行情...")
         req = tdapi.CThostFtdcQryDepthMarketDataField()
         self._api.ReqQryDepthMarketData(req, 0)
 
