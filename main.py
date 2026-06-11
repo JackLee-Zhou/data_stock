@@ -254,6 +254,19 @@ def _reload_env_file_values_preserving_overrides() -> None:
     _RUNTIME_ENV_FILE_KEYS = managed_keys
 
 
+def _start_ctp_if_configured():
+    """启动 CTP 行情（如果已配置账号），失败不影响主流程。"""
+    try:
+        from src.services import ctp_service
+        status = ctp_service.start_ctp()
+        if status.connected:
+            logging.getLogger(__name__).info(
+                "[CTP] 行情已连接: day=%s subs=%d", status.trading_day, status.subscribed_count
+            )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("[CTP] 自动启动失败: %s", exc)
+
+
 def _migrate_watchlist_on_startup(config) -> None:
     """启动时将 .env 的 STOCK_LIST 迁移到 watchlist 表（仅首次）。"""
     import logging
@@ -865,6 +878,9 @@ def main() -> int:
     logger.info("A股自选股智能分析系统 启动")
     logger.info(f"运行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
+
+    # 自动启动 CTP 行情连接（非阻塞，失败不影响主流程）
+    _ = _start_ctp_if_configured()
 
     # 验证配置
     warnings = config.validate()
