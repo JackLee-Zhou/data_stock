@@ -492,13 +492,16 @@ class CtpConsole(cmd.Cmd):
             print(f"\n  [Enter 下一页 | b 上一页 | q 退出 | 第{offset//page_size+1}/{total_pages}页]",
                   file=self.stdout, flush=True)
             try:
-                cmd = input().strip().lower()
+                line = self.stdin.readline()
+                if not line:
+                    break
+                cmd = line.strip().lower()
                 if cmd == 'q':
                     print("已退出", file=self.stdout, flush=True)
                     conn.close(); return
                 elif cmd == 'b':
                     offset = max(0, offset - page_size * 2)
-            except (EOFError, Exception):
+            except Exception:
                 break
 
         conn.close()
@@ -574,14 +577,37 @@ class CtpConsole(cmd.Cmd):
 
     def do_quit(self, _):
         """退出引擎"""
-        print("正在关闭...")
+        print("正在关闭...", file=self.stdout, flush=True)
         return True
 
     def do_EOF(self, _):
         return True
 
     def default(self, line):
-        print(f"未知命令: {line}，输入 help 查看帮助")
+        print(f"未知命令: {line}，输入 help 查看帮助", file=self.stdout, flush=True)
+
+    def cmdloop(self, intro=None):
+        """自定义命令循环：用 self.stdin.readline() 替代 sys.stdin"""
+        if intro is not None:
+            self.intro = intro
+        if self.intro:
+            self.stdout.write(self.intro + "\n")
+            self.stdout.flush()
+        stop = None
+        while not stop:
+            if self.cmdqueue:
+                line = self.cmdqueue.pop(0)
+            else:
+                self.stdout.write(self.prompt)
+                self.stdout.flush()
+                line = self.stdin.readline()
+                if not line:
+                    break
+                line = line.rstrip('\r\n')
+            line = self.precmd(line)
+            stop = self.onecmd(line)
+            stop = self.postcmd(stop, line)
+        return stop
 
 
 # ── 主入口 ──────────────────────────────────────────
