@@ -167,24 +167,78 @@ _drop_lock = threading.Lock()
 
 
 # ── 按天 SQLite ─────────────────────────────────────
+# 完整表结构（含5档盘口）
+_CTP_TICK_DDL = """CREATE TABLE IF NOT EXISTS ctp_tick (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    trade_time TEXT NOT NULL,
+    price REAL, volume REAL, open_interest REAL,
+    bid1 REAL, bid_vol1 REAL,
+    bid2 REAL, bid_vol2 REAL,
+    bid3 REAL, bid_vol3 REAL,
+    bid4 REAL, bid_vol4 REAL,
+    bid5 REAL, bid_vol5 REAL,
+    ask1 REAL, ask_vol1 REAL,
+    ask2 REAL, ask_vol2 REAL,
+    ask3 REAL, ask_vol3 REAL,
+    ask4 REAL, ask_vol4 REAL,
+    ask5 REAL, ask_vol5 REAL,
+    high REAL, low REAL, open REAL, prev_close REAL
+)"""
+_CTP_TICK_ALL_COLS = [
+    "code", "trade_time", "price", "volume", "open_interest",
+    "bid1", "bid_vol1", "bid2", "bid_vol2", "bid3", "bid_vol3",
+    "bid4", "bid_vol4", "bid5", "bid_vol5",
+    "ask1", "ask_vol1", "ask2", "ask_vol2", "ask3", "ask_vol3",
+    "ask4", "ask_vol4", "ask5", "ask_vol5",
+    "high", "low", "open", "prev_close",
+]
+# 5档列（用于 display 拼接）
+_DEPTH_COLS_SQL = (
+    "bid5,bid_vol5,bid4,bid_vol4,bid3,bid_vol3,bid2,bid_vol2,bid1,bid_vol1,"
+    "ask1,ask_vol1,ask2,ask_vol2,ask3,ask_vol3,ask4,ask_vol4,ask5,ask_vol5"
+)
+
+_migrated_dbs = set()  # 已迁移过的 DB 路径，避免重复检查
+
+def _migrate_db(conn: sqlite3.Connection):
+    """补齐旧库缺少的5档列（兼容升级）"""
+    cur = conn.execute("PRAGMA table_info(ctp_tick)")
+    existing = {r[1] for r in cur.fetchall()}
+    needed = [
+        "bid_vol1", "bid2", "bid_vol2", "bid3", "bid_vol3",
+        "bid4", "bid_vol4", "bid5", "bid_vol5",
+        "ask_vol1",
+        "ask2", "ask_vol2", "ask3", "ask_vol3",
+        "ask4", "ask_vol4", "ask5", "ask_vol5",
+    ]
+    for col in needed:
+        if col not in existing:
+            try:
+                conn.execute(f"ALTER TABLE ctp_tick ADD COLUMN {col} REAL")
+                logger.info("DB 迁移: 新增列 %s", col)
+            except sqlite3.OperationalError as e:
+                logger.debug("DB 迁移跳过 %s: %s", col, e)
+
 def get_daily_db(d: Optional[date] = None) -> str:
     """获取当天的 SQLite 数据库路径，自动创建表。"""
     d = d or date.today()
     db_path = os.path.join(DATA_DIR, f"{d.strftime('%Y%m%d')}.db")
     if not os.path.exists(db_path):
         conn = sqlite3.connect(db_path)
-        conn.execute("""CREATE TABLE IF NOT EXISTS ctp_tick (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT NOT NULL,
-            trade_time TEXT NOT NULL,
-            price REAL, volume REAL, open_interest REAL,
-            bid1 REAL, ask1 REAL,
-            high REAL, low REAL, open REAL, prev_close REAL
-        )""")
+        conn.execute(_CTP_TICK_DDL)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_code_time ON ctp_tick(code, trade_time)")
         conn.commit()
         conn.close()
         logger.info("新建日库: %s", os.path.basename(db_path))
+    else:
+        # 对已存在的库执行迁移（同进程内仅首次）
+        if db_path not in _migrated_dbs:
+            conn = sqlite3.connect(db_path)
+            _migrate_db(conn)
+            conn.commit()
+            conn.close()
+            _migrated_dbs.add(db_path)
     return db_path
 
 
@@ -237,15 +291,31 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
         encoded = [c.encode() for c in codes]
         self.api.UnSubscribeMarketData(encoded, len(encoded))
 
+    @staticmethod
+    def _safe_price(v) -> Optional[float]:
+        return v if (v is not None and 0 < v < 1e100) else None
+
     def OnRtnDepthMarketData(self, pData):
         if not pData or pData.LastPrice <= 0: return
+        sp = self._safe_price
         tick = {
             "code": pData.InstrumentID,
-            "time": datetime.now(TZ).isoformat(),
+            "trade_time": datetime.now(TZ).isoformat(),
             "price": pData.LastPrice,
             "volume": pData.Volume, "open_interest": pData.OpenInterest,
-            "bid1": pData.BidPrice1 if 0 < pData.BidPrice1 < 1e100 else None,
-            "ask1": pData.AskPrice1 if 0 < pData.AskPrice1 < 1e100 else None,
+            # 买1-5（注：SimNow 模拟环境仅推送1档；实盘 CTP 才有5档深度）
+            "bid1": sp(pData.BidPrice1), "bid_vol1": pData.BidVolume1 if pData.BidPrice1 else None,
+            "bid2": sp(pData.BidPrice2), "bid_vol2": pData.BidVolume2 if pData.BidPrice2 else None,
+            "bid3": sp(pData.BidPrice3), "bid_vol3": pData.BidVolume3 if pData.BidPrice3 else None,
+            "bid4": sp(pData.BidPrice4), "bid_vol4": pData.BidVolume4 if pData.BidPrice4 else None,
+            "bid5": sp(pData.BidPrice5), "bid_vol5": pData.BidVolume5 if pData.BidPrice5 else None,
+            # 卖1-5
+            "ask1": sp(pData.AskPrice1), "ask_vol1": pData.AskVolume1 if pData.AskPrice1 else None,
+            "ask2": sp(pData.AskPrice2), "ask_vol2": pData.AskVolume2 if pData.AskPrice2 else None,
+            "ask3": sp(pData.AskPrice3), "ask_vol3": pData.AskVolume3 if pData.AskPrice3 else None,
+            "ask4": sp(pData.AskPrice4), "ask_vol4": pData.AskVolume4 if pData.AskPrice4 else None,
+            "ask5": sp(pData.AskPrice5), "ask_vol5": pData.AskVolume5 if pData.AskPrice5 else None,
+            # 统计
             "high": pData.HighestPrice if pData.HighestPrice > 0 else None,
             "low": pData.LowestPrice if pData.LowestPrice > 0 else None,
             "open": pData.OpenPrice if pData.OpenPrice > 0 else None,
@@ -281,12 +351,11 @@ def storage_worker():
                 db_path = get_daily_db()
                 conn = sqlite3.connect(db_path)
                 conn.execute("BEGIN")
+                col_names = ",".join(_CTP_TICK_ALL_COLS)
+                placeholders = ",".join("?" * len(_CTP_TICK_ALL_COLS))
+                insert_sql = f"INSERT INTO ctp_tick({col_names}) VALUES({placeholders})"
                 for t in batch:
-                    conn.execute(
-                        "INSERT INTO ctp_tick(code,trade_time,price,volume,open_interest,bid1,ask1,high,low,open,prev_close) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                        (t["code"], t["time"], t["price"], t["volume"], t["open_interest"],
-                         t["bid1"], t["ask1"], t["high"], t["low"], t["open"], t["prev_close"])
-                    )
+                    conn.execute(insert_sql, tuple(t.get(c) for c in _CTP_TICK_ALL_COLS))
                     state.add_tick(t)
                 conn.commit()
                 conn.close()
@@ -435,12 +504,74 @@ class CtpConsole(cmd.Cmd):
             print(f"  PUSH_URL: {PUSH_URL or '未配置'}", file=self.stdout, flush=True)
             print(f"  间隔: {PUSH_INTERVAL}s | 累计推送: {state.push_count}", file=self.stdout, flush=True)
 
+    # ── 表格（look 用 tabulate；tail 用手动固定宽以保证增量一致性）──
+    _TBL_HDRS  = ['Time','Last','Vol','OI','B5','B4','B3','B2','B1','A1','A2','A3','A4','A5']
+    _TBL_ALIGN = ('left',) + ('right',) * 13
+    # tail -f 用手动列宽（充足以容纳价格/量和千分位数字）
+    _TAIL_WIDTHS = [14, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11]
+    _TAIL_ALIGNS = ['<','>','>','>','>','>','>','>','>','>','>','>','>','>']
+    _TBL_LEGEND = (
+        "  Time=时间 Last=最新价 Vol=成交量 OI=持仓 | "
+        "B5-B1=买五→买一 A1-A5=卖一→卖五 | 空档='-'"
+    )
+    _LOOK_SELECT = (
+        "trade_time,price,volume,open_interest,"
+        "bid5,bid_vol5,bid4,bid_vol4,bid3,bid_vol3,bid2,bid_vol2,bid1,bid_vol1,"
+        "ask1,ask_vol1,ask2,ask_vol2,ask3,ask_vol3,ask4,ask_vol4,ask5,ask_vol5"
+    )
+
+    @staticmethod
+    def _fmt_time(raw):
+        ts = str(raw or "")
+        if "T" in ts:        return ts.split("T")[1][:12]
+        elif " " in ts:      return ts.split(" ")[1][:12] if len(ts) > 10 else ts
+        else:                return ts[-15:] if len(ts) > 15 else ts
+
+    @staticmethod
+    def _fmt_depth(p, v):
+        if p is None:         return "-"
+        return f"{int(p)}@{int(v)}"
+
+    @classmethod
+    def _fmt_tail_row(cls, values):
+        """tail -f 用：固定列宽，ASCII 纯字符长度对齐"""
+        cells = []
+        for v, w, a in zip(values, cls._TAIL_WIDTHS, cls._TAIL_ALIGNS):
+            s = str(v) if v is not None else ""
+            cells.append(s.ljust(w) if a == '<' else s.rjust(w))
+        return "  " + " ".join(cells)
+
+    @classmethod
+    def _tail_header_lines(cls):
+        hdr = cls._fmt_tail_row(cls._TBL_HDRS)
+        sep = "-" * len(hdr)
+        return hdr, sep
+
+    def _build_depth_row(self, r):
+        return [
+            self._fmt_time(r[0]),
+            f"{float(r[1] or 0):.1f}",
+            f"{int(float(r[2] or 0)):,d}",
+            f"{int(float(r[3] or 0)):,d}",
+            self._fmt_depth(r[4], r[5]),
+            self._fmt_depth(r[6], r[7]),
+            self._fmt_depth(r[8], r[9]),
+            self._fmt_depth(r[10], r[11]),
+            self._fmt_depth(r[12], r[13]),
+            self._fmt_depth(r[14], r[15]),
+            self._fmt_depth(r[16], r[17]),
+            self._fmt_depth(r[18], r[19]),
+            self._fmt_depth(r[20], r[21]),
+            self._fmt_depth(r[22], r[23]),
+        ]
+
     def do_look(self, arg):
         """查看合约历史数据: look fu2609 [20260611] [-n 100]"""
+        from tabulate import tabulate
         import sqlite3 as _sqlite
         parts = arg.strip().split()
         if not parts:
-            print("用法: look <合约代码> [日期] [-n 条数]，不传-n默认显示最新100条", file=self.stdout, flush=True)
+            print("用法: look <合约代码> [日期] [-n 条数]", file=self.stdout, flush=True)
             return
         code = parts[0]
         day = date.today().strftime("%Y%m%d")
@@ -453,34 +584,109 @@ class CtpConsole(cmd.Cmd):
                 day = parts[i]; i += 1
             else:
                 i += 1
-
         db_path = os.path.join(DATA_DIR, f"{day}.db")
         if not os.path.exists(db_path):
             print(f"数据文件不存在: {day}.db", file=self.stdout, flush=True)
             return
-
         conn = _sqlite.connect(db_path)
         total = conn.execute("SELECT COUNT(*) FROM ctp_tick WHERE code=?", (code,)).fetchone()[0]
         if total == 0:
             print(f"{code} 在 {day} 无数据", file=self.stdout, flush=True)
             conn.close(); return
-
         rows = conn.execute(
-            "SELECT trade_time,price,volume,open_interest,bid1,ask1 FROM ctp_tick WHERE code=? ORDER BY trade_time DESC LIMIT ?",
+            f"SELECT {self._LOOK_SELECT} FROM ctp_tick WHERE code=? ORDER BY trade_time DESC LIMIT ?",
             (code, min(limit, 200))
         ).fetchall()
         conn.close()
-
+        # 组装数据行
+        data = [self._build_depth_row(r) for r in reversed(rows)]
+        # tabulate 渲染（plain 格式，纯 ASCII，自适应列宽，精确对齐）
+        table = tabulate(data, headers=self._TBL_HDRS, tablefmt='plain',
+                         colalign=self._TBL_ALIGN, disable_numparse=True)
         print(f"\n  {code} | {day} | 共 {total} 条，显示最新 {len(rows)} 条", file=self.stdout, flush=True)
-        print(f"  {'时间':<22s} {'价格':>10s} {'成交量':>12s} {'持仓':>10s} {'买一':>10s} {'卖一':>10s}", file=self.stdout, flush=True)
-        print(f"  {'-'*76}", file=self.stdout, flush=True)
-        for r in reversed(rows):
-            try:
-                print(f"  {str(r[0] or '')[:32]:<22s} {float(r[1] or 0):>10.2f} {int(float(r[2] or 0)):>12,d} {int(float(r[3] or 0)):>10,d} {str(r[4] or ''):>10s} {str(r[5] or ''):>10s}",
-                      file=self.stdout, flush=True)
-            except Exception:
-                continue
+        print(self._TBL_LEGEND, file=self.stdout, flush=True)
+        self.stdout.write(table + "\n")
+        self.stdout.flush()
         print(f"\n  -- 完 --", file=self.stdout, flush=True)
+
+    def do_tail(self, arg):
+        """实时监控最新行情: tail fu2609 [-n 条数] [-f [条数]]  默认显示最新50条"""
+        parts = arg.strip().split()
+        if not parts:
+            print("用法: tail <合约代码> [-n 条数] [-f [条数]]  默认显示最新50条，-f 持续监控", file=self.stdout, flush=True)
+            return
+        code = parts[0]
+        limit = 50
+        follow = False
+        i = 1
+        while i < len(parts):
+            if parts[i] == "-f":
+                follow = True
+                i += 1
+                # -f 后可跟可选数字控制显示条数，如 -f 100
+                if i < len(parts) and (parts[i].isdigit() or (parts[i].startswith('-') and parts[i][1:].isdigit())):
+                    limit = int(parts[i])
+                    i += 1
+            elif parts[i] == "-n" and i + 1 < len(parts):
+                limit = int(parts[i+1]); i += 2
+            else:
+                i += 1
+
+        import select as _select
+        import sqlite3 as _sqlite
+        day = date.today().strftime("%Y%m%d")
+        db_path = os.path.join(DATA_DIR, f"{day}.db")
+        last_id = 0
+        header_printed = False
+
+        while True:
+            if not os.path.exists(db_path):
+                print(f"  等待数据...", file=self.stdout, flush=True)
+                time.sleep(2)
+                continue
+
+            conn = _sqlite.connect(db_path)
+            rows = conn.execute(
+                f"SELECT id,{self._LOOK_SELECT} FROM ctp_tick WHERE code=? AND id>? ORDER BY id DESC LIMIT ?",
+                (code, last_id, limit)
+            ).fetchall()
+            conn.close()
+
+            if rows:
+                if not header_printed:
+                    if follow:
+                        print("  (输入 q 退出)", file=self.stdout, flush=True)
+                    print(f"\n  {code} | {day}", file=self.stdout, flush=True)
+                    print(self._TBL_LEGEND, file=self.stdout, flush=True)
+                    hdr, sep = self._tail_header_lines()
+                    print(hdr, file=self.stdout, flush=True)
+                    print(sep, file=self.stdout, flush=True)
+                    header_printed = True
+                for r in reversed(rows):
+                    if r[0] > last_id: last_id = r[0]
+                    try:
+                        self.stdout.write(self._fmt_tail_row(self._build_depth_row(r[1:])) + "\n")
+                        self.stdout.flush()
+                    except Exception:
+                        continue
+
+            if not follow:
+                if header_printed:
+                    print(f"\n  -- 完 --", file=self.stdout, flush=True)
+                else:
+                    print(f"{code} 在 {day} 无数据", file=self.stdout, flush=True)
+                break
+
+            # 非阻塞检测是否输入了 q，支持退出
+            try:
+                rlist, _, _ = _select.select([self.stdin], [], [], 2)
+                if rlist:
+                    ch = self.stdin.readline().strip()
+                    if ch == 'q':
+                        print("  退出 tail", file=self.stdout, flush=True)
+                        break
+            except Exception:
+                time.sleep(2)
 
     def do_size(self, arg):
         """查看数据大小: size [合约代码]"""
