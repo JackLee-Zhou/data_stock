@@ -489,21 +489,16 @@ class CtpConsole(cmd.Cmd):
             offset += page_size
             if offset >= total: break
 
-            print(f"\n  [Enter/n 下一页 | b 上一页 | q 退出 | 第{offset//page_size+1}/{total_pages}页]",
+            print(f"\n  [Enter 下一页 | b 上一页 | q 退出 | 第{offset//page_size+1}/{total_pages}页]",
                   file=self.stdout, flush=True)
             try:
-                # 逐字符读取，支持回车/空格=下一页，b=上一页，q=退出
-                while True:
-                    ch = self.stdin.read(1)
-                    if ch in ('\n', '\r', ' ', 'n', 'j'):
-                        break
-                    elif ch == 'b':
-                        offset = max(0, offset - page_size * 2)
-                        break
-                    elif ch == 'q':
-                        print("\n已退出", file=self.stdout, flush=True)
-                        conn.close(); return
-            except Exception:
+                cmd = input().strip().lower()
+                if cmd == 'q':
+                    print("已退出", file=self.stdout, flush=True)
+                    conn.close(); return
+                elif cmd == 'b':
+                    offset = max(0, offset - page_size * 2)
+            except (EOFError, Exception):
                 break
 
         conn.close()
