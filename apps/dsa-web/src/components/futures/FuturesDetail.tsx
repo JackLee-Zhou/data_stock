@@ -16,23 +16,29 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
   const [tf, setTf] = useState<Timeframe>('1d');
   const [spot, setSpot] = useState({ price: 0, changePct: 0, vol: 0, oi: 0, high: 0, low: 0, open: 0, prevClose: 0 });
   const [depth, setDepth] = useState<DepthLevel[]>([]);
+  const lastPriceRef = useRef(0);  // 跨 effect 保持上一次价格
 
+  // 切换合约/周期时重置，拉K线
   useEffect(() => {
-    setLoading(true);
+    setKline([]); setLoading(true); setSpot({ price: 0, changePct: 0, vol: 0, oi: 0, high: 0, low: 0, open: 0, prevClose: 0 });
+    setDepth([]); lastPriceRef.current = 0;
+
     futuresApi.getKline(quote.contractCode, 120, tf === '1d' ? 'daily' : tf).then(data => {
       const items = data.klines.map((k: any) => ({
-        time: (k.tradeDate || '').slice(0, tf === '1d' ? 10 : 19),  // 日K:date, 分时:datetime
+        time: (k.tradeDate || '').slice(0, tf === '1d' ? 10 : 19),
         open: k.open, high: k.high, low: k.low, close: k.close,
       }));
       setKline(items);
-      if (items.length >= 2) {
-        const last = items[items.length - 1], prev = items[items.length - 2];
-        setSpot(s => ({ ...s, price: last.close, changePct: prev.close ? (last.close - prev.close) / prev.close * 100 : 0 }));
+      if (items.length > 0) {
+        const last = items[items.length - 1];
+        lastPriceRef.current = last.close;
+        setSpot(s => ({ ...s, price: last.close }));
       }
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [quote.contractCode]);
+  }, [quote.contractCode, tf]);
 
+  // CTP 实时行情轮询
   useEffect(() => {
     const poll = async () => {
       try {
@@ -40,9 +46,11 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
         const d = await r.json();
         const q = d.quotes?.[quote.contractCode];
         if (q && q.price > 0) {
+          const prev = lastPriceRef.current || q.price;
+          lastPriceRef.current = q.price;
           setSpot(s => ({
             price: q.price,
-            changePct: s.price > 0 ? ((q.price - s.price) / s.price * 100) : 0,
+            changePct: prev ? ((q.price - prev) / prev * 100) : 0,
             vol: Number(q.volume || 0), oi: Number(q.open_interest || 0),
             high: Number(q.high || 0), low: Number(q.low || 0),
             open: Number(q.open || 0), prevClose: Number(q.prev_close || 0),
@@ -56,24 +64,20 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
     return () => clearInterval(t);
   }, [quote.contractCode]);
 
+  // K线图渲染
   useEffect(() => {
     if (!chartRef.current || kline.length === 0) return;
-    const rootStyle = getComputedStyle(document.documentElement);
-    const gridColor = `hsl(${rootStyle.getPropertyValue('--border').trim()})`;
-    const textColor = `hsl(${rootStyle.getPropertyValue('--muted-foreground').trim()})`;
-    const upColor = `hsl(${rootStyle.getPropertyValue('--color-success').trim()})`;
-    const downColor = `hsl(${rootStyle.getPropertyValue('--color-danger').trim()})`;
     const c = createChart(chartRef.current, {
       height: 480,
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor },
-      grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
-      rightPriceScale: { borderColor: gridColor },
-      timeScale: { borderColor: gridColor, timeVisible: true },
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#9ca3af' },
+      grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+      rightPriceScale: { borderColor: '#374151' },
+      timeScale: { borderColor: '#374151', timeVisible: true },
     });
     const candle = c.addSeries(CandlestickSeries, {
-      upColor, downColor,
-      borderUpColor: upColor, borderDownColor: downColor,
-      wickUpColor: upColor, wickDownColor: downColor,
+      upColor: '#10b981', downColor: '#ef4444',
+      borderUpColor: '#10b981', borderDownColor: '#ef4444',
+      wickUpColor: '#10b981', wickDownColor: '#ef4444',
     });
     candle.setData(kline);
     c.timeScale().fitContent();
@@ -84,13 +88,10 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
   const bidMaxVol = Math.max(...depth.map(d => d.bv), 1);
   const askMaxVol = Math.max(...depth.map(d => d.av), 1);
   const fmtN = (v: number) => v > 0 ? (v > 10000 ? (v/10000).toFixed(1)+'万' : v.toLocaleString()) : '-';
-
-  // 过滤无效档位（价格为null的）
   const activeDepth = depth.filter(d => d.bp !== null || d.ap !== null);
 
   return (
     <div className="glass-panel-lg p-5 space-y-3">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-lg font-bold text-foreground">{quote.contractName}</span>
@@ -117,13 +118,9 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
       </div>
 
       <div className="flex gap-4">
-        {/* Left: Chart */}
         <div className="flex-1 min-w-0">
           <div className="grid grid-cols-6 gap-2 mb-3">
-            {[
-              ['今开', spot.open], ['最高', spot.high], ['最低', spot.low],
-              ['昨收', spot.prevClose], ['成交量', spot.vol], ['持仓', spot.oi],
-            ].map(([l, v]) => (
+            {[['今开', spot.open], ['最高', spot.high], ['最低', spot.low], ['昨收', spot.prevClose], ['成交量', spot.vol], ['持仓', spot.oi]].map(([l, v]) => (
               <div key={l} className="rounded-lg bg-surface-hover px-2 py-1.5 text-center">
                 <div className="text-[10px] text-tertiary-text">{l}</div>
                 <div className="text-xs font-semibold tabular-nums text-foreground">{fmtN(Number(v))}</div>
@@ -135,10 +132,8 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
           ) : <div ref={chartRef} />}
         </div>
 
-        {/* Right: 五档盘口 */}
         <div className="w-[240px] shrink-0 space-y-2">
           <div className="text-xs font-medium text-secondary-text mb-2">五档盘口</div>
-          {/* Sells (reversed: 卖5→卖1) */}
           {[...activeDepth].reverse().map((d, i) => (
             <div key={`a-${i}`} className="grid grid-cols-[1fr_60px_auto] gap-2 text-xs items-center">
               <span className="text-right text-red-500 font-mono tabular-nums">{d.ap?.toFixed(2) || ''}</span>
@@ -148,16 +143,12 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
               </div>
             </div>
           ))}
-          {/* Spread */}
           <div className="py-1.5 text-center border-y border-border">
             <span className="text-sm font-bold font-mono tabular-nums text-foreground">{spot.price > 0 ? spot.price.toFixed(2) : '-'}</span>
             {activeDepth[0]?.bp && activeDepth[0]?.ap && (
-              <span className="text-[10px] text-tertiary-text ml-2">
-                价差 {(activeDepth[0].ap! - activeDepth[0].bp!).toFixed(2)}
-              </span>
+              <span className="text-[10px] text-tertiary-text ml-2">价差 {(activeDepth[0].ap! - activeDepth[0].bp!).toFixed(2)}</span>
             )}
           </div>
-          {/* Buys (买1→买5) */}
           {activeDepth.map((d, i) => (
             <div key={`b-${i}`} className="grid grid-cols-[auto_60px_1fr] gap-2 text-xs items-center">
               <div className="h-4 rounded-sm bg-emerald-500/15 relative overflow-hidden">
