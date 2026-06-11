@@ -103,11 +103,18 @@ class CtpMdAdapter:
         """订阅合约行情。返回成功订阅数。"""
         if not self._api or not self._connected:
             return 0
-        subscribed = 0
-        for code in codes:
-            ret = self._api.SubscribeMarketData([code.encode()])
-            if ret == 0:
-                subscribed += 1
+        count = 0
+        for code in codes[:10]:  # 限制订阅数量
+            try:
+                c_bytes = code.encode('utf-8') if isinstance(code, str) else code
+                ret = self._api.SubscribeMarketData([c_bytes], 1)
+                if ret == 0:
+                    count += 1
+            except Exception as e:
+                logger.debug("[CTP-MD] 订阅 %s 失败: %s", code, e)
+        self._status.subscribed_count = count
+        logger.info("[CTP-MD] 订阅合约: %d/%d", count, len(codes))
+        return count
         self._status.subscribed_count = subscribed
         logger.info("[CTP-MD] 订阅合约: %d/%d", subscribed, len(codes))
         return subscribed

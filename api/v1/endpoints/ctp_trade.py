@@ -15,7 +15,7 @@ def _get_td():
         broker = os.getenv("CTP_BROKER_ID", "9999")
         user = os.getenv("CTP_USER_ID", "")
         pwd = os.getenv("CTP_PASSWORD", "")
-        front = os.getenv("CTP_TRADE_FRONT", "tcp://180.168.146.187:10130")
+        front = os.getenv("CTP_TRADE_FRONT", "tcp://182.254.243.31:30001")
         if not user or not pwd:
             raise HTTPException(503, detail="CTP 账号未配置")
         adapter.connect(front, broker, user, pwd)

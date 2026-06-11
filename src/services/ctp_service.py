@@ -19,7 +19,7 @@ def start_ctp() -> CtpStatus:
     if _ctp_started:
         return CtpMdAdapter().status
 
-    md_front = os.getenv("CTP_MD_FRONT", "tcp://180.168.146.187:10131")
+    md_front = os.getenv("CTP_MD_FRONT", "tcp://182.254.243.31:30011")
     broker = os.getenv("CTP_BROKER_ID", "9999")
     user = os.getenv("CTP_USER_ID", "")
     pwd = os.getenv("CTP_PASSWORD", "")
