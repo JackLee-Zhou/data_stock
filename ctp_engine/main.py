@@ -475,9 +475,12 @@ class CtpConsole(cmd.Cmd):
         print(f"  {'时间':<22s} {'价格':>10s} {'成交量':>12s} {'持仓':>10s} {'买一':>10s} {'卖一':>10s}", file=self.stdout, flush=True)
         print(f"  {'-'*76}", file=self.stdout, flush=True)
         for r in reversed(rows):
-            print(f"  {r[0]:<22s} {r[1]:>10.2f} {int(r[2] or 0):>12,d} {int(r[3] or 0):>10,d} {r[4] or '':>10s} {r[5] or '':>10s}",
-                  file=self.stdout, flush=True)
-        print(f"  -- 完 --", file=self.stdout, flush=True)
+            try:
+                print(f"  {str(r[0] or '')[:32]:<22s} {float(r[1] or 0):>10.2f} {int(float(r[2] or 0)):>12,d} {int(float(r[3] or 0)):>10,d} {str(r[4] or ''):>10s} {str(r[5] or ''):>10s}",
+                      file=self.stdout, flush=True)
+            except Exception:
+                continue
+        print(f"\n  -- 完 --", file=self.stdout, flush=True)
 
     def do_size(self, arg):
         """查看数据大小: size [合约代码]"""
