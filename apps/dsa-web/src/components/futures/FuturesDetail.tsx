@@ -58,17 +58,22 @@ export const FuturesDetail: React.FC<{ quote: FuturesQuote; onClose: () => void 
 
   useEffect(() => {
     if (!chartRef.current || kline.length === 0) return;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const gridColor = `hsl(${rootStyle.getPropertyValue('--border').trim()})`;
+    const textColor = `hsl(${rootStyle.getPropertyValue('--muted-foreground').trim()})`;
+    const upColor = `hsl(${rootStyle.getPropertyValue('--color-success').trim()})`;
+    const downColor = `hsl(${rootStyle.getPropertyValue('--color-danger').trim()})`;
     const c = createChart(chartRef.current, {
       height: 480,
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#9ca3af' },
-      grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
-      rightPriceScale: { borderColor: '#374151' },
-      timeScale: { borderColor: '#374151', timeVisible: true },
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor },
+      grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
+      rightPriceScale: { borderColor: gridColor },
+      timeScale: { borderColor: gridColor, timeVisible: true },
     });
     const candle = c.addSeries(CandlestickSeries, {
-      upColor: '#10b981', downColor: '#ef4444',
-      borderUpColor: '#10b981', borderDownColor: '#ef4444',
-      wickUpColor: '#10b981', wickDownColor: '#ef4444',
+      upColor, downColor,
+      borderUpColor: upColor, borderDownColor: downColor,
+      wickUpColor: upColor, wickDownColor: downColor,
     });
     candle.setData(kline);
     c.timeScale().fitContent();

@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Check, SlidersHorizontal } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { getParsedApiError, type ParsedApiError } from '../api/error';
 import { analysisApi } from '../api/analysis';
@@ -408,7 +409,9 @@ const HomePage: React.FC = () => {
       const r = await fetch(`/api/v1/hedge-fund/analyze?stock_code=${selectedReport.meta.stockCode}`, { method: 'POST' });
       const data = await r.json();
       setMastersResult(data);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      setMastersResult(null);
+    }
     finally { setMastersLoading(false); }
   }, [selectedReport]);
 
@@ -619,7 +622,7 @@ const HomePage: React.FC = () => {
       className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
     >
       <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full lg:max-w-6xl mx-auto w-full">
-        <header className="relative z-30 flex min-w-0 flex-shrink-0 items-center overflow-visible px-3 py-3 md:px-4 md:py-4">
+        <header className="relative z-30 flex min-w-0 flex-shrink-0 items-center overflow-visible border-b border-[var(--home-divider-border)] px-3 py-3 md:px-5 md:py-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2.5 md:flex-row md:items-center">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <button
@@ -660,44 +663,50 @@ const HomePage: React.FC = () => {
                     <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                     <span className="truncate">{selectedStrategy?.name || t('home.strategy')}</span>
                   </button>
-                  {strategyMenuOpen ? (
-                    <div
-                      id="strategy-menu"
-                      role="menu"
-                      aria-labelledby="strategy-menu-button"
-                      onKeyDown={handleStrategyMenuKeyDown}
-                      className="absolute right-0 top-11 z-[120] max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
-                    >
-                      {strategyOptions.map((option, index) => {
-                        const selected = selectedStrategyId === option.id;
-                        return (
-                          <button
-                            key={option.id || 'default'}
-                            ref={(node) => {
-                              strategyItemRefs.current[index] = node;
-                            }}
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={selected}
-                            tabIndex={-1}
-                            onClick={() => selectStrategy(option.id)}
-                            className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover"
-                          >
-                            <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${selected ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
-                            <span className="min-w-0">
-                              <span className="block font-medium">{option.name}</span>
-                              <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-text">{option.description}</span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                  <AnimatePresence>
+                    {strategyMenuOpen ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -4, scale: 0.96 }}
+                        transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                        id="strategy-menu"
+                        role="menu"
+                        aria-labelledby="strategy-menu-button"
+                        onKeyDown={handleStrategyMenuKeyDown}
+                        className="absolute right-0 top-11 z-[120] max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
+                      >
+                        {strategyOptions.map((option, index) => {
+                          const selected = selectedStrategyId === option.id;
+                          return (
+                            <button
+                              key={option.id || 'default'}
+                              ref={(node) => {
+                                strategyItemRefs.current[index] = node;
+                              }}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={selected}
+                              tabIndex={-1}
+                              onClick={() => selectStrategy(option.id)}
+                              className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover"
+                            >
+                              <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${selected ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
+                              <span className="min-w-0">
+                                <span className="block font-medium">{option.name}</span>
+                                <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-text">{option.description}</span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
                 </div>
               ) : null}
             </div>
             <div className="flex min-w-0 flex-shrink-0 items-center gap-2.5">
-              <label className="flex h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-surface/60 px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground">
+              <label className="flex h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-subtle px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground">
                 <input
                   type="checkbox"
                   checked={notify}
@@ -795,7 +804,7 @@ const HomePage: React.FC = () => {
             <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
               <div className="page-drawer-overlay absolute inset-0" />
               <div
-                className="dashboard-card absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-2xl"
+                className="dashboard-card card-gradient-mask card-top-line absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-2xl"
                 onClick={(event) => event.stopPropagation()}
               >
                 {sidebarContent}
@@ -830,12 +839,18 @@ const HomePage: React.FC = () => {
             ) : null}
 
             {marketReviewReport ? (
-              <MarketReviewReportView
-                content={marketReviewReport}
-                payload={marketReviewPayload}
-                reportLanguage={liveMarketReviewLanguage}
-                className="mb-3"
-              />
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <MarketReviewReportView
+                  content={marketReviewReport}
+                  payload={marketReviewPayload}
+                  reportLanguage={liveMarketReviewLanguage}
+                  className="mb-3"
+                />
+              </motion.div>
             ) : null}
 
             {error ? (
@@ -850,7 +865,12 @@ const HomePage: React.FC = () => {
                 <DashboardStateBlock title={t('home.loadingReport')} loading />
               </div>
             ) : !marketReviewReport && selectedReport ? (
-              <div className={isHistoryTrendOpen ? 'max-w-6xl space-y-4 pb-8' : 'max-w-4xl space-y-4 pb-8'}>
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                className={isHistoryTrendOpen ? 'max-w-6xl space-y-4 pb-8' : 'max-w-4xl space-y-4 pb-8'}
+              >
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {!isMarketReviewHistoryReport ? (
                     <>
@@ -929,17 +949,30 @@ const HomePage: React.FC = () => {
                 {/* 大师会诊结果 */}
                 {mastersLoading && <div className="text-sm text-secondary-text mt-4"><Loading label="大师会诊分析中…" /></div>}
                 {mastersResult && !mastersLoading && (
-                  <div className="mt-4 rounded-xl border border-border bg-surface p-4">
-                    <h3 className="text-sm font-semibold mb-2">🧠 大师会诊 — {mastersResult.stock_code}</h3>
+                  <div className="mt-4 rounded-xl border border-subtle bg-card p-4">
+                    <h3 className="text-sm font-semibold mb-2" style={{ color: 'hsl(var(--color-purple))' }}>
+                      🧠 大师会诊 — {mastersResult.stock_code}
+                    </h3>
                     <div className="text-xs text-secondary-text mb-2">
-                      综合信号: <span className={`font-bold ${mastersResult.aggregated.signal === 'bullish' ? 'text-emerald-600' : mastersResult.aggregated.signal === 'bearish' ? 'text-red-500' : 'text-amber-500'}`}>{mastersResult.aggregated.signal === 'bullish' ? '看涨' : mastersResult.aggregated.signal === 'bearish' ? '看跌' : '中性'}</span>
+                      综合信号:{' '}
+                      <span className={
+                        mastersResult.aggregated.signal === 'bullish' ? 'text-success font-bold' :
+                        mastersResult.aggregated.signal === 'bearish' ? 'text-danger font-bold' :
+                        'text-warning font-bold'
+                      }>
+                        {mastersResult.aggregated.signal === 'bullish' ? '看涨' : mastersResult.aggregated.signal === 'bearish' ? '看跌' : '中性'}
+                      </span>
                       &nbsp;| 信心 {mastersResult.aggregated.confidence}%
                       &nbsp;| 看涨{mastersResult.aggregated.bullish_count} 看跌{mastersResult.aggregated.bearish_count} 中性{mastersResult.aggregated.neutral_count}
                     </div>
                     <div className="space-y-1.5 max-h-64 overflow-y-auto">
                       {Object.entries(mastersResult.masters as Record<string, any>).map(([id, m]: [string, any]) => (
                         <div key={id} className="flex items-center gap-2 text-xs">
-                          <span className={`w-1.5 h-1.5 rounded-full ${m.signal === 'bullish' ? 'bg-emerald-500' : m.signal === 'bearish' ? 'bg-red-500' : 'bg-amber-500'}`} />
+                          <span className={
+                            m.signal === 'bullish' ? 'w-1.5 h-1.5 rounded-full bg-success' :
+                            m.signal === 'bearish' ? 'w-1.5 h-1.5 rounded-full bg-danger' :
+                            'w-1.5 h-1.5 rounded-full bg-warning'
+                          } />
                           <span className="font-medium w-24 truncate">{m.name}</span>
                           <span className="tabular-nums w-10 text-right">{m.confidence}%</span>
                           {m.reasoning && <span className="text-secondary-text truncate flex-1">{m.reasoning}</span>}
@@ -977,7 +1010,7 @@ const HomePage: React.FC = () => {
                     }}
                   />
                 )}
-              </div>
+              </motion.div>
             ) : !marketReviewReport ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState

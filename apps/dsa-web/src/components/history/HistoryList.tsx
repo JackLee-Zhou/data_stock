@@ -93,7 +93,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   }, [someVisibleSelected]);
 
   return (
-    <aside className={`glass-card overflow-hidden flex flex-col ${className}`}>
+    <aside className={`glass-card card-gradient-mask card-top-line overflow-hidden flex flex-col ${className}`}>
       <ScrollArea
         viewportRef={scrollContainerRef}
         viewportClassName="p-4"

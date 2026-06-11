@@ -121,8 +121,8 @@ function layoutNodes(
     target: e.target,
     label: e.label,
     animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 1.5 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
+    style: { stroke: 'var(--text-muted-text)', strokeWidth: 1.5 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--text-muted-text)' },
   }));
 
   return { flowNodes, flowEdges };
@@ -169,15 +169,15 @@ export const SupplyChainGraph: React.FC<SupplyChainGraphProps> = ({
         maxZoom={2}
         attributionPosition="bottom-right"
       >
-        <Background color="#e2e8f0" gap={20} />
+        <Background color="var(--border-subtle)" gap={20} />
         <Controls />
         <MiniMap
           nodeColor={(n) => {
             const t = (n.data as ChainNodeData | undefined)?.nodeType;
-            if (t === 'upstream') return '#60a5fa';
-            if (t === 'midstream') return '#34d399';
-            if (t === 'downstream') return '#fbbf24';
-            return '#94a3b8';
+            if (t === 'upstream') return 'var(--color-cyan)';
+            if (t === 'midstream') return 'var(--color-success)';
+            if (t === 'downstream') return 'var(--color-warning)';
+            return 'var(--text-muted-text)';
           }}
           style={{ height: 100 }}
         />

@@ -33,8 +33,8 @@ export const Card: React.FC<CardProps> = ({
   };
 
   const variantStyles = {
-    default: 'terminal-card',
-    bordered: 'terminal-card',
+    default: 'terminal-card card-gradient-mask',
+    bordered: 'terminal-card card-gradient-mask',
     gradient: 'gradient-border-card',
   };
 

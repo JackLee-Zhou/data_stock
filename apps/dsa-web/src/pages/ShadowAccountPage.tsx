@@ -40,7 +40,9 @@ const ShadowAccountPage: React.FC = () => {
         const data = await r.json();
         if (data.price) setTradeForm(f => ({ ...f, symbol: sym.toUpperCase(), price: data.price }));
       }
-    } catch {}
+    } catch {
+      /* Best-effort price fetch — silently fall back to manual price entry */
+    }
     finally { setFetchingPrice(false); }
   };
 

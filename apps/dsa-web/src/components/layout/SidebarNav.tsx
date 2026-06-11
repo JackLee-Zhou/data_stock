@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart3, Bell, BriefcaseBusiness, GitBranch, Home, LineChart, LogOut, MessageSquareQuote, Search, Settings2, TrendingUp } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { motion } from 'motion/react';
 import { ALPHASIFT_CONFIG_CHANGED_EVENT, SYSTEM_CONFIG_CHANGED_EVENT, alphasiftApi } from '../../api/alphasift';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
@@ -22,23 +23,33 @@ type NavItem = {
   key: string;
   labelKey: UiTextKey;
   to: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; color?: string }>;
   exact?: boolean;
   badge?: 'completion';
 };
 
-const NAV_ITEMS: NavItem[] = [
-  { key: 'home', labelKey: 'layout.nav.home', to: '/', icon: Home, exact: true },
-  { key: 'chat', labelKey: 'layout.nav.chat', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
-  { key: 'screening', labelKey: 'layout.nav.screening', to: '/screening', icon: Search },
-  { key: 'portfolio', labelKey: 'layout.nav.portfolio', to: '/portfolio', icon: BriefcaseBusiness },
-  { key: 'backtest', labelKey: 'layout.nav.backtest', to: '/backtest', icon: BarChart3 },
-  { key: 'futures', labelKey: 'layout.nav.futures', to: '/futures', icon: TrendingUp },
-  { key: 'sectorChain', labelKey: 'layout.nav.sectorChain', to: '/sector-chain', icon: GitBranch },
-  { key: 'shadowAccount', labelKey: 'layout.nav.shadowAccount', to: '/shadow-account', icon: LineChart },
-  { key: 'alerts', labelKey: 'layout.nav.alerts', to: '/alerts', icon: Bell },
-  { key: 'settings', labelKey: 'layout.nav.settings', to: '/settings', icon: Settings2 },
+type NavColor = 'cyan' | 'purple' | 'success' | 'warning' | 'muted';
+
+const NAV_ITEMS: (NavItem & { color: NavColor })[] = [
+  { key: 'home', labelKey: 'layout.nav.home', to: '/', icon: Home, exact: true, color: 'cyan' },
+  { key: 'chat', labelKey: 'layout.nav.chat', to: '/chat', icon: MessageSquareQuote, badge: 'completion', color: 'purple' },
+  { key: 'screening', labelKey: 'layout.nav.screening', to: '/screening', icon: Search, color: 'cyan' },
+  { key: 'portfolio', labelKey: 'layout.nav.portfolio', to: '/portfolio', icon: BriefcaseBusiness, color: 'success' },
+  { key: 'backtest', labelKey: 'layout.nav.backtest', to: '/backtest', icon: BarChart3, color: 'warning' },
+  { key: 'futures', labelKey: 'layout.nav.futures', to: '/futures', icon: TrendingUp, color: 'cyan' },
+  { key: 'sectorChain', labelKey: 'layout.nav.sectorChain', to: '/sector-chain', icon: GitBranch, color: 'purple' },
+  { key: 'shadowAccount', labelKey: 'layout.nav.shadowAccount', to: '/shadow-account', icon: LineChart, color: 'success' },
+  { key: 'alerts', labelKey: 'layout.nav.alerts', to: '/alerts', icon: Bell, color: 'warning' },
+  { key: 'settings', labelKey: 'layout.nav.settings', to: '/settings', icon: Settings2, color: 'muted' },
 ];
+
+const NAV_COLOR_MAP: Record<NavColor, string> = {
+  cyan: 'var(--color-cyan)',
+  purple: 'var(--color-purple)',
+  success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
+  muted: 'var(--text-muted-text)',
+};
 
 export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNavigate, variant = 'default' }) => {
   const { authEnabled, logout } = useAuth();
@@ -115,9 +126,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
       </div>
 
       <nav className={cn('flex flex-col gap-1.5', isRail ? '' : 'flex-1')} aria-label={t('layout.mainNav')}>
-        {navItems.map(({ key, labelKey, to, icon: Icon, exact, badge }) => {
+        {navItems.map(({ key, labelKey, to, icon: Icon, exact, badge, color }, i) => {
+          const iconColor = NAV_COLOR_MAP[color];
           const label = t(labelKey);
           return (
+          <motion.div
+            key={key}
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.25, delay: i * 0.04, ease: [0.22, 1, 0.36, 1] }}
+          >
           <NavLink
             key={key}
             to={to}
@@ -133,7 +151,10 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
           >
             {({ isActive }) => (
               <>
-                <Icon className={cn(itemIconClass, isActive ? 'text-[var(--nav-icon-active)]' : 'text-current')} />
+                <Icon
+                  className={cn(itemIconClass)}
+                  color={isActive ? undefined : iconColor}
+                />
                 {!collapsed ? <span className={itemLabelClass}>{label}</span> : null}
                 {badge === 'completion' && completionBadge ? (
                   <StatusDot
@@ -149,6 +170,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
               </>
             )}
           </NavLink>
+          </motion.div>
         );
         })}
 
