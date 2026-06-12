@@ -41,7 +41,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 # 加载 .env
 from dotenv import load_dotenv
-load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
+load_dotenv(os.path.join(ENGINE_DIR, '.env'))  # 优先引擎目录，Docker 兼容
 
 from openctp_ctp import mdapi, tdapi
 
