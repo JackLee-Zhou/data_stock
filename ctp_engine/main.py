@@ -164,6 +164,7 @@ state = EngineState()
 tick_queue: Queue = Queue(maxsize=1000000)  # 100万tick ≈ 4小时缓冲
 _dropped_ticks = 0
 _drop_lock = threading.Lock()
+engine_stop_event = threading.Event()  # MD 重连超限时通知主线程退出
 
 
 # ── 按天 SQLite ─────────────────────────────────────
@@ -244,13 +245,21 @@ def get_daily_db(d: Optional[date] = None) -> str:
 
 # ── MD SPI ──────────────────────────────────────────
 class MdSpi(mdapi.CThostFtdcMdSpi):
+    _MAX_RECONNECT = 3       # 1 分钟内最多重连次数
+    _RECONNECT_WINDOW = 60   # 重连计数窗口（秒）
+
     def __init__(self):
         mdapi.CThostFtdcMdSpi.__init__(self)
         self.api: Optional[mdapi.CThostFtdcMdApi] = None
         self.logged_in = threading.Event()
+        self._reconnect_lock = threading.Lock()
+        self._disconnect_times = []  # 记录断连时间戳（滑动窗口）
 
     def OnFrontConnected(self):
         state.connected = True
+        # 连接成功，重置断连计数
+        with self._reconnect_lock:
+            self._disconnect_times.clear()
         logger.info("MD 连接成功，登录中...")
         req = mdapi.CThostFtdcReqUserLoginField()
         req.BrokerID = BROKER_ID; req.UserID = USER_ID; req.Password = PASSWORD
@@ -259,13 +268,37 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
 
     def OnFrontDisconnected(self, reason: int):
         state.connected = False
-        logger.warning("MD 断开: reason=%d, 10s 后自动重连...", reason)
-        # 异步重连（避免在 CTP 回调中阻塞）
+        now = time.time()
+        with self._reconnect_lock:
+            # 清理 1 分钟前的旧记录
+            cutoff = now - self._RECONNECT_WINDOW
+            self._disconnect_times = [t for t in self._disconnect_times if t > cutoff]
+            self._disconnect_times.append(now)
+            attempt = len(self._disconnect_times)
+
+        if attempt > self._MAX_RECONNECT:
+            logger.error(
+                "MD 1分钟内断连%d次（超过上限%d），重连失败，通知主线程退出",
+                attempt, self._MAX_RECONNECT
+            )
+            engine_stop_event.set()
+            return
+
+        # 递增等待：10s / 20s / 30s，共 3 次刚好 60s 内
+        wait = 10 * attempt
+        logger.warning(
+            "MD 断开: reason=%d, %ds 后第 %d/%d 次重连...",
+            reason, wait, attempt, self._MAX_RECONNECT
+        )
+
         def _reconnect():
-            time.sleep(10)
-            self.api.RegisterFront(MD_FRONT)
-            self.api.Init()
-            logger.info("MD 重连已发起")
+            time.sleep(wait)
+            try:
+                self.api.RegisterFront(MD_FRONT)
+                self.api.Init()
+                logger.info("MD 第 %d 次重连已发起", attempt)
+            except Exception as exc:
+                logger.error("MD 重连调用异常: %s", exc)
         threading.Thread(target=_reconnect, daemon=True).start()
 
     def OnRspUserLogin(self, pRsp, pErr, nReq, bLast):
@@ -884,9 +917,11 @@ def main():
     threading.Thread(target=console_server, daemon=True, name="console").start()
 
     try:
-        while True:
-            time.sleep(60)
-            logger.debug("心跳: ticks=%d queue=%d", state.tick_count, tick_queue.qsize())
+        while not engine_stop_event.is_set():
+            engine_stop_event.wait(timeout=60)
+            if not engine_stop_event.is_set():
+                logger.debug("心跳: ticks=%d queue=%d", state.tick_count, tick_queue.qsize())
+        logger.error("引擎因 MD 重连超限退出")
     except KeyboardInterrupt:
         print("\n收到中断信号")
     finally:
